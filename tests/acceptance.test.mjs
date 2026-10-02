@@ -283,11 +283,34 @@ async function runTests() {
   assert(inningsState.extras.noBalls === 1, 'No-ball did not count as legal ball');
 
   // Bowler selection validation:
+  assert(inningsState.pendingNewBowler === true, 'End of over requires selecting next bowler');
   // Completed over bowler is bowl1. Next bowler cannot be bowl1.
   const currentBowlerId = 'bowl1';
   const availableNextBowlers = bowlingPlayers.filter(b => b.id !== currentBowlerId);
   assert(!availableNextBowlers.some(b => b.id === 'bowl1'), 'Current bowler cannot be selected as next bowler');
   assert(availableNextBowlers.some(b => b.id === 'bowl2'), 'Other bowlers remain available');
+
+  // Next Bowler selection via BOWLER_CHANGE event:
+  const updatedEventsWithBowlerChange = [
+    ...deliverySequence,
+    {
+      id: 'bc1',
+      type: EVENT_TYPES.BOWLER_CHANGE,
+      bowlerId: 'bowl2',
+      legalBall: false
+    }
+  ];
+  const postBowlerChangeState = reconstructInnings({
+    events: updatedEventsWithBowlerChange,
+    battingPlayers,
+    bowlingPlayers,
+    totalOvers: 5,
+    openingStrikerId: 'b1',
+    openingNonStrikerId: 'b2',
+    openingBowlerId: 'bowl1'
+  });
+  assert(postBowlerChangeState.currentBowlerId === 'bowl2', 'Next bowler is updated to bowl2');
+  assert(postBowlerChangeState.pendingNewBowler === false, 'Selecting next bowler clears pendingNewBowler state without infinite loops');
 
   // Batsman declaration validation:
   const strikerId = 'b1';

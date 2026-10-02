@@ -209,10 +209,22 @@ export class ScoringService {
       bowlerId
     };
 
-    return await this.provider.updateMatch({
+    await this.provider.updateMatch({
       ...match,
       innings: updatedInningsList
     });
+
+    const event = {
+      id: generateId('event'),
+      type: EVENT_TYPES.BOWLER_CHANGE,
+      inningsIndex,
+      bowlerId,
+      runs: 0,
+      legalBall: false,
+      timestamp: new Date().toISOString()
+    };
+
+    return await this.provider.saveMatchEvent(matchId, event);
   }
 
   async undoLastEvent(matchId) {

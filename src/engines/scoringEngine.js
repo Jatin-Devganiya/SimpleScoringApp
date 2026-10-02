@@ -12,7 +12,8 @@ export const EVENT_TYPES = {
   WIDE: 'WIDE',
   NO_BALL: 'NO_BALL',
   WICKET: 'WICKET',
-  DECLARE: 'DECLARE'
+  DECLARE: 'DECLARE',
+  BOWLER_CHANGE: 'BOWLER_CHANGE'
 };
 
 /**
@@ -232,6 +233,11 @@ export function reconstructInnings({
         } else if (declaredId === nonStrikerId) {
           nonStrikerId = ev.newBatsmanId;
         }
+      }
+    } else if (ev.type === EVENT_TYPES.BOWLER_CHANGE) {
+      if (ev.bowlerId) {
+        currentBowlerId = ev.bowlerId;
+        pendingNewBowler = false;
       }
     }
 

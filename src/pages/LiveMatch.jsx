@@ -22,6 +22,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
   const [showSecondInningsModal, setShowSecondInningsModal] = useState(false);
 
   // Modal form states
+  const [promptedOver, setPromptedOver] = useState(null);
   const [newBatsmanId, setNewBatsmanId] = useState('');
   const [newBowlerId, setNewBowlerId] = useState('');
   const [declareTarget, setDeclareTarget] = useState('striker');
@@ -74,10 +75,14 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
     const currentInningsIndex = matchState.match.currentInningsIndex || 0;
     const inningsData = currentInningsIndex === 0 ? matchState.innings1 : matchState.innings2;
 
+    const overIdentifier = `${currentInningsIndex}_${inningsData?.overs}`;
     if (inningsData?.pendingNewBowler && !inningsData?.isInningsCompleted && !matchState.isMatchCompleted) {
-      setShowBowlerModal(true);
+      if (promptedOver !== overIdentifier) {
+        setPromptedOver(overIdentifier);
+        setShowBowlerModal(true);
+      }
     }
-  }, [matchState, canScore]);
+  }, [matchState, canScore, promptedOver]);
 
 
   if (loading && !matchState) {
@@ -227,13 +232,17 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
     }
 
     try {
+      setShowBowlerModal(false);
+      const chosenBowler = newBowlerId;
+      setNewBowlerId('');
+      const overIdentifier = `${currentInningsIndex}_${currentInningsData?.overs}`;
+      setPromptedOver(overIdentifier);
+
       await scoringService.setNextBowler(matchId, {
-        bowlerId: newBowlerId,
+        bowlerId: chosenBowler,
         inningsIndex: currentInningsIndex
       });
 
-      setShowBowlerModal(false);
-      setNewBowlerId('');
       await loadMatchState();
     } catch (err) {
       alert(`Bowler error: ${err.message}`);
@@ -560,14 +569,12 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
               >
                 Continue Over
               </button>
-              {!currentInningsData?.pendingNewBowler && (
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => setShowBowlerModal(false)}
-                >
-                  Cancel
-                </button>
-              )}
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowBowlerModal(false)}
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>
