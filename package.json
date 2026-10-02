@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node -e \"import('fs').then(fs => fs.cpSync('dist', 'docs', { recursive: true }))\"",
     "preview": "vite preview",
     "test": "node --env-file=.env tests/acceptance.test.mjs",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist --dotfiles"
+
 
   },
   "dependencies": {
