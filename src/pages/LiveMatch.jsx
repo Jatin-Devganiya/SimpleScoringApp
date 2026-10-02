@@ -27,6 +27,9 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
   const [newBowlerId, setNewBowlerId] = useState('');
   const [declareTarget, setDeclareTarget] = useState('striker');
   const [declareReplacementId, setDeclareReplacementId] = useState('');
+  const [dismissalType, setDismissalType] = useState('Bowled');
+  const [dismissedTarget, setDismissedTarget] = useState('striker');
+  const [wicketRuns, setWicketRuns] = useState(0);
 
   const [secondInningsStriker, setSecondInningsStriker] = useState('');
   const [secondInningsNonStriker, setSecondInningsNonStriker] = useState('');
@@ -207,18 +210,28 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
       return;
     }
 
+    const isRunOut = dismissalType === 'Run Out';
+    const dismissedPlayerId = isRunOut && dismissedTarget === 'nonStriker'
+      ? currentInningsData.nonStrikerId
+      : currentInningsData.strikerId;
+
     try {
       await scoringService.recordWicket(matchId, {
-        dismissedPlayerId: currentInningsData.strikerId,
+        dismissedPlayerId,
         newBatsmanId: newBatsmanId || null,
         strikerId: currentInningsData.strikerId,
         nonStrikerId: currentInningsData.nonStrikerId,
         bowlerId: currentInningsData.currentBowlerId,
         inningsIndex: currentInningsIndex,
-        runs: 0
+        runs: isRunOut ? (Number(wicketRuns) || 0) : 0,
+        dismissalType,
+        isBowlerWicket: !isRunOut
       });
       setShowWicketModal(false);
       setNewBatsmanId('');
+      setWicketRuns(0);
+      setDismissalType('Bowled');
+      setDismissedTarget('striker');
       await loadMatchState();
     } catch (err) {
       alert(`Wicket error: ${err.message}`);
@@ -462,8 +475,13 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
               onWide={handleWide}
               onNoBall={handleNoBall}
               onWicketClick={() => {
+                setDismissalType('Bowled');
+                setDismissedTarget('striker');
+                setWicketRuns(0);
                 if (availableBatsmen.length > 0) {
                   setNewBatsmanId(availableBatsmen[0].id);
+                } else {
+                  setNewBatsmanId('');
                 }
                 setShowWicketModal(true);
               }}
@@ -484,14 +502,120 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
       {showWicketModal && canScore && (
         <div className="modal-overlay">
           <div className="modal-card">
-            <h3 className="modal-title" style={{ color: 'var(--accent-red)' }}>Wicket Fallen!</h3>
-            <p className="modal-desc">
-              Dismissed Batsman: <strong>{strikerStats?.name || 'Striker'}</strong>
-            </p>
+            <h3 className="modal-title" style={{ color: 'var(--accent-red)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <ShieldAlert size={20} /> Wicket Fallen!
+            </h3>
 
+            {/* Dismissal Type Selector */}
+            <div className="form-group" style={{ marginBottom: '14px' }}>
+              <label className="form-label">How was the wicket taken?</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                {['Bowled', 'Caught', 'LBW', 'Run Out', 'Stumped', 'Hit Wicket'].map((type) => {
+                  const isSelected = dismissalType === type;
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => setDismissalType(type)}
+                      style={{
+                        padding: '8px 4px',
+                        fontSize: '0.8rem',
+                        fontWeight: isSelected ? 700 : 500,
+                        borderRadius: 'var(--radius-sm)',
+                        border: `1px solid ${isSelected ? 'var(--accent-red)' : 'var(--border-color)'}`,
+                        background: isSelected ? 'rgba(239, 68, 68, 0.2)' : 'var(--bg-surface-elevated)',
+                        color: isSelected ? '#fff' : 'var(--text-secondary)',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      {type}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Run Out Specific Options: Who was run out and how many runs completed */}
+            {dismissalType === 'Run Out' ? (
+              <div style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: 'var(--radius-md)', padding: '12px', marginBottom: '16px' }}>
+                <div className="form-group" style={{ marginBottom: '12px' }}>
+                  <label className="form-label" style={{ color: '#fca5a5' }}>Who was Run Out?</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                    <div
+                      onClick={() => setDismissedTarget('striker')}
+                      style={{
+                        padding: '10px',
+                        borderRadius: 'var(--radius-sm)',
+                        border: `2px solid ${dismissedTarget === 'striker' ? 'var(--accent-red)' : 'var(--border-color)'}`,
+                        background: dismissedTarget === 'striker' ? 'rgba(239, 68, 68, 0.2)' : 'var(--bg-surface)',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <div style={{ fontSize: '0.72rem', color: 'var(--accent-yellow)', fontWeight: 700 }}>★ STRIKER</div>
+                      <div style={{ fontWeight: 600, fontSize: '0.9rem', color: '#fff', marginTop: '2px' }}>
+                        {strikerStats?.name || 'Striker'}
+                      </div>
+                    </div>
+
+                    <div
+                      onClick={() => setDismissedTarget('nonStriker')}
+                      style={{
+                        padding: '10px',
+                        borderRadius: 'var(--radius-sm)',
+                        border: `2px solid ${dismissedTarget === 'nonStriker' ? 'var(--accent-red)' : 'var(--border-color)'}`,
+                        background: dismissedTarget === 'nonStriker' ? 'rgba(239, 68, 68, 0.2)' : 'var(--bg-surface)',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 600 }}>NON-STRIKER</div>
+                      <div style={{ fontWeight: 600, fontSize: '0.9rem', color: '#fff', marginTop: '2px' }}>
+                        {nonStrikerStats?.name || 'Non-Striker'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ color: '#fca5a5' }}>
+                    Runs Completed on this delivery ({wicketRuns} {wicketRuns === 1 ? 'run' : 'runs'})
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+                    {[0, 1, 2, 3].map((r) => {
+                      const isSel = wicketRuns === r;
+                      return (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => setWicketRuns(r)}
+                          style={{
+                            padding: '6px 0',
+                            fontSize: '0.85rem',
+                            fontWeight: isSel ? 700 : 500,
+                            borderRadius: 'var(--radius-sm)',
+                            border: `1px solid ${isSel ? 'var(--accent-green)' : 'var(--border-color)'}`,
+                            background: isSel ? 'rgba(16, 185, 129, 0.2)' : 'var(--bg-surface)',
+                            color: isSel ? 'var(--accent-green)' : 'var(--text-primary)',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {r} {r === 1 ? 'Run' : 'Runs'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ marginBottom: '14px', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                Dismissed Batsman: <strong style={{ color: '#fff' }}>{strikerStats?.name || 'Striker'}</strong>
+              </div>
+            )}
+
+            {/* Incoming Batsman */}
             {availableBatsmen.length > 0 ? (
               <div className="form-group">
-                <label className="form-label">Incoming Batsman (Batting Squad)</label>
+                <label className="form-label">Incoming Replacement Batsman</label>
                 <select
                   className="form-select"
                   value={newBatsmanId}
@@ -517,7 +641,9 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
                 onClick={handleConfirmWicket}
                 disabled={availableBatsmen.length > 0 && !newBatsmanId}
               >
-                Confirm Wicket
+                {dismissalType === 'Run Out' && wicketRuns > 0
+                  ? `Confirm Run Out (+${wicketRuns} Runs)`
+                  : 'Confirm Wicket'}
               </button>
               <button
                 className="btn btn-secondary"

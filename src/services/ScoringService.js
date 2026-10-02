@@ -99,10 +99,13 @@ export class ScoringService {
     nonStrikerId,
     bowlerId,
     inningsIndex = 0,
-    runs = 0
+    runs = 0,
+    dismissalType = 'Bowled',
+    isBowlerWicket = true
   }) {
     await this._verifyScorerOwnership(matchId);
 
+    const parsedRuns = Number(runs) || 0;
     const events = await this.provider.getMatchEvents(matchId);
     const event = {
       id: generateId('event'),
@@ -110,8 +113,8 @@ export class ScoringService {
       inningsIndex,
       sequence: events.length + 1,
       type: EVENT_TYPES.WICKET,
-      runs,
-      batRuns: 0,
+      runs: parsedRuns,
+      batRuns: parsedRuns,
       extraRuns: 0,
       legalBall: true,
       strikerId,
@@ -119,6 +122,8 @@ export class ScoringService {
       bowlerId,
       dismissedPlayerId,
       newBatsmanId,
+      dismissalType,
+      isBowlerWicket: dismissalType === 'Run Out' ? false : isBowlerWicket,
       timestamp: new Date().toISOString()
     };
 

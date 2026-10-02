@@ -325,6 +325,40 @@ async function runTests() {
   );
   assert(availableNewBatsmen.length === 1 && availableNewBatsmen[0].id === 'b4', 'Dismissed batsman cannot be selected as new batsman');
 
+  // Run Out with runs test:
+  const runOutEvents = [
+    {
+      id: 'ro1',
+      type: EVENT_TYPES.WICKET,
+      runs: 2,
+      strikerId: 'b1',
+      nonStrikerId: 'b2',
+      bowlerId: 'bowl1',
+      dismissedPlayerId: 'b2',
+      newBatsmanId: 'b3',
+      dismissalType: 'Run Out',
+      isBowlerWicket: false,
+      legalBall: true
+    }
+  ];
+  const runOutState = reconstructInnings({
+    events: runOutEvents,
+    battingPlayers,
+    bowlingPlayers,
+    totalOvers: 5,
+    openingStrikerId: 'b1',
+    openingNonStrikerId: 'b2',
+    openingBowlerId: 'bowl1'
+  });
+  assert(runOutState.score === 2, 'Run out scored 2 runs for the team');
+  assert(runOutState.wickets === 1, 'Run out incremented team wickets by 1');
+  assert(runOutState.batsmanStats['b1'].runs === 2, 'Facing batsman credited with 2 runs');
+  assert(runOutState.batsmanStats['b2'].isOut === true, 'Non-striker marked as out');
+  assert(runOutState.batsmanStats['b2'].dismissalText === 'run out', 'Dismissal text shows run out');
+  assert(runOutState.bowlerStats['bowl1'].wickets === 0, 'Bowler not credited with run out wicket');
+  assert(runOutState.bowlerStats['bowl1'].runs === 2, 'Bowler conceded 2 runs on delivery');
+  assert(runOutState.nonStrikerId === 'b3', 'Replacement batsman correctly positioned');
+
   console.log('\n==================================================');
   console.log(`TEST SUMMARY: ${passed} Passed, ${failed} Failed`);
   console.log('==================================================');

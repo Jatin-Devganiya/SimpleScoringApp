@@ -189,26 +189,57 @@ export function reconstructInnings({
       }
     } else if (ev.type === EVENT_TYPES.WICKET) {
       const dismissedId = ev.dismissedPlayerId || strikerId;
-      totalRuns += (ev.runs || 0);
+      const runs = ev.runs || 0;
+      const isRunOut = ev.dismissalType === 'Run Out' || ev.isBowlerWicket === false;
+
+      totalRuns += runs;
       wickets += 1;
       legalBalls += 1;
+
+      // The batsman facing the delivery (striker) faced 1 ball and scored any bat runs
+      if (bStats) {
+        bStats.balls += 1;
+        if (runs > 0) {
+          bStats.runs += runs;
+          if (runs === 4) bStats.fours += 1;
+          if (runs === 6) bStats.sixes += 1;
+        }
+      }
 
       const outBatsmanStats = batsmanStats[dismissedId];
       if (outBatsmanStats) {
         outBatsmanStats.isOut = true;
-        outBatsmanStats.balls += 1;
-        outBatsmanStats.dismissalText = `b ${bowlStats?.name || 'Bowler'}`;
+        if (dismissedId === strikerId && !bStats) {
+          outBatsmanStats.balls += 1;
+        }
+        if (isRunOut) {
+          outBatsmanStats.dismissalText = 'run out';
+        } else if (ev.dismissalType) {
+          outBatsmanStats.dismissalText = `${ev.dismissalType.toLowerCase()} b ${bowlStats?.name || 'Bowler'}`;
+        } else {
+          outBatsmanStats.dismissalText = `b ${bowlStats?.name || 'Bowler'}`;
+        }
       }
 
       if (bowlStats) {
         bowlStats.legalBalls += 1;
-        bowlStats.wickets += 1;
-        bowlStats.runs += (ev.runs || 0);
+        bowlStats.runs += runs;
+        // In cricket, run outs are not credited to the bowler
+        if (!isRunOut) {
+          bowlStats.wickets += 1;
+        }
       }
 
-      currentOverBalls.push('W');
+      currentOverBalls.push(runs > 0 ? `${runs}W` : 'W');
 
-      // Set new batsman
+      // Strike rotation if completed runs were odd
+      if (runs % 2 === 1) {
+        const temp = strikerId;
+        strikerId = nonStrikerId;
+        nonStrikerId = temp;
+      }
+
+      // Set new batsman to replace dismissed batsman
       if (ev.newBatsmanId) {
         if (dismissedId === strikerId) {
           strikerId = ev.newBatsmanId;
