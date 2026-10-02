@@ -32,6 +32,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
   const [secondInningsBowler, setSecondInningsBowler] = useState('');
 
   const isUmpire = authService.isUmpire();
+  const canScore = isUmpire && authService.canModify(matchState?.match);
 
   const loadMatchState = useCallback(async () => {
     try {
@@ -43,8 +44,8 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
       }
       setMatchState(state);
 
-      // Auto-save completion if match finished
-      if (state.isMatchCompleted && state.match.status !== 'COMPLETED' && isUmpire) {
+      // Auto-save completion if match finished (only if creator umpire)
+      if (state.isMatchCompleted && state.match.status !== 'COMPLETED' && authService.canModify(state.match)) {
         await matchService.completeMatch(matchId, state.matchResult);
       }
     } catch (err) {
@@ -53,7 +54,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
     } finally {
       setLoading(false);
     }
-  }, [matchId, isUmpire]);
+  }, [matchId]);
 
   useEffect(() => {
     loadMatchState();
@@ -67,16 +68,17 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
     };
   }, [matchId, loadMatchState]);
 
-  // Check if an over just completed to automatically open Next Bowler modal for Umpire
+  // Check if an over just completed to automatically open Next Bowler modal for the creator Umpire
   useEffect(() => {
-    if (!matchState || !isUmpire) return;
+    if (!matchState || !canScore) return;
     const currentInningsIndex = matchState.match.currentInningsIndex || 0;
     const inningsData = currentInningsIndex === 0 ? matchState.innings1 : matchState.innings2;
 
     if (inningsData?.pendingNewBowler && !inningsData?.isInningsCompleted && !matchState.isMatchCompleted) {
       setShowBowlerModal(true);
     }
-  }, [matchState, isUmpire]);
+  }, [matchState, canScore]);
+
 
   if (loading && !matchState) {
     return (
@@ -304,7 +306,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
         </button>
 
         <div style={{ display: 'flex', gap: '8px' }}>
-          {isUmpire && !isFirstInningsFinished && !isMatchCompleted && (
+          {canScore && !isFirstInningsFinished && !isMatchCompleted && (
             <button
               className="btn btn-secondary"
               onClick={() => {
@@ -329,13 +331,16 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
         </div>
       </div>
 
-      {/* Read-Only Viewer Notice for User role */}
-      {!isUmpire && (
-        <div className="alert-box alert-success" style={{ background: 'rgba(59, 130, 246, 0.1)', borderColor: 'rgba(59, 130, 246, 0.3)', color: '#93c5fd' }}>
-          <ShieldAlert size={18} />
-          <span>You are viewing this match in read-only mode (Role: USER). Only an active Umpire can record scoring events.</span>
+      {/* Read-Only Spectator Notice */}
+      {!canScore && (
+        <div className="alert-box" style={{ background: 'rgba(59, 130, 246, 0.1)', borderColor: 'rgba(59, 130, 246, 0.3)', color: '#93c5fd' }}>
+          <Eye size={18} />
+          <span>
+            <strong>Spectator Mode:</strong> {match.createdBy ? `This match was created and is scored by "${match.createdBy}".` : 'Viewing in read-only mode.'} Only the creator umpire can record score changes.
+          </span>
         </div>
       )}
+
 
       {/* Main Scoreboard Display */}
       <LiveScore
@@ -366,7 +371,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
             {firstBattingTeam?.name} scored <strong>{innings1?.score}/{innings1?.wickets}</strong> in {innings1?.overs} overs.
             Target for {secondBattingTeam?.name} is <strong>{(innings1?.score || 0) + 1}</strong> runs.
           </p>
-          {isUmpire ? (
+          {canScore ? (
             <button
               className="btn btn-primary"
               style={{ margin: '0 auto' }}
@@ -418,7 +423,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
             />
             <BowlingScore
               bowlerStats={bowlerStats}
-              onSwitchBowlerClick={isUmpire ? () => setShowBowlerModal(true) : null}
+              onSwitchBowlerClick={canScore ? () => setShowBowlerModal(true) : null}
             />
           </div>
 
@@ -429,7 +434,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
           />
 
           {/* Over complete alert prompt for Umpire */}
-          {currentInningsData?.pendingNewBowler && isUmpire && (
+          {currentInningsData?.pendingNewBowler && canScore && (
             <div className="alert-box alert-success" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
               <span>Over complete (6 legal balls)! Please select the bowler for the next over.</span>
               <button
@@ -442,8 +447,8 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
             </div>
           )}
 
-          {/* Large Scoring Buttons (VISIBLE ONLY TO UMPIRE) */}
-          {isUmpire ? (
+          {/* Large Scoring Buttons (VISIBLE ONLY TO CREATOR UMPIRE) */}
+          {canScore ? (
             <ScoreButtons
               onRun={handleRun}
               onWide={handleWide}
@@ -460,14 +465,15 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
             />
           ) : (
             <div className="card" style={{ textAlign: 'center', padding: '16px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-              Scoring keypad is disabled for normal viewers. Umpire controls the match in real time.
+              Scoring controls are disabled in spectator mode. Only the creator umpire can score this match.
             </div>
           )}
         </>
       )}
 
+
       {/* Wicket Modal */}
-      {showWicketModal && isUmpire && (
+      {showWicketModal && canScore && (
         <div className="modal-overlay">
           <div className="modal-card">
             <h3 className="modal-title" style={{ color: 'var(--accent-red)' }}>Wicket Fallen!</h3>
@@ -517,7 +523,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
       )}
 
       {/* Next Bowler Modal (Automatic after 6 legal deliveries) */}
-      {showBowlerModal && isUmpire && (
+      {showBowlerModal && canScore && (
         <div className="modal-overlay">
           <div className="modal-card">
             <h3 className="modal-title">
@@ -569,7 +575,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
       )}
 
       {/* Declare Batsmen Modal */}
-      {showDeclareModal && isUmpire && (
+      {showDeclareModal && canScore && (
         <div className="modal-overlay">
           <div className="modal-card">
             <h3 className="modal-title">Declare Batsmen</h3>
@@ -630,8 +636,9 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
       )}
 
       {/* Start 2nd Innings Modal */}
-      {showSecondInningsModal && isUmpire && (
+      {showSecondInningsModal && canScore && (
         <div className="modal-overlay">
+
           <div className="modal-card">
             <h3 className="modal-title">Setup 2nd Innings</h3>
             <p className="modal-desc">

@@ -25,11 +25,12 @@ export class LocalStorageProvider extends StorageProvider {
       }
       return {
         version: parsed.version || 1,
+        users: Array.isArray(parsed.users) ? parsed.users : [],
         players: Array.isArray(parsed.players) ? parsed.players : [],
         teams: Array.isArray(parsed.teams) ? parsed.teams : [],
         matches: Array.isArray(parsed.matches) ? parsed.matches : [],
         events: parsed.events && typeof parsed.events === 'object' ? parsed.events : {},
-        activeUmpireSession: parsed.activeUmpireSession || null,
+        activeUmpireSessions: parsed.activeUmpireSessions && typeof parsed.activeUmpireSessions === 'object' ? parsed.activeUmpireSessions : {},
         metadata: parsed.metadata || { lastUpdated: new Date().toISOString() }
       };
     } catch (err) {
@@ -59,16 +60,18 @@ export class LocalStorageProvider extends StorageProvider {
   _getEmptyStore() {
     return {
       version: appConfig.APP_VERSION || 1,
+      users: [],
       players: [],
       teams: [],
       matches: [],
       events: {},
-      activeUmpireSession: null,
+      activeUmpireSessions: {},
       metadata: {
         lastUpdated: new Date().toISOString()
       }
     };
   }
+
 
   _notifyListeners(matchId) {
     if (matchId && this.listeners.has(matchId)) {
@@ -291,14 +294,39 @@ export class LocalStorageProvider extends StorageProvider {
     return true;
   }
 
-  // --- Single Umpire Session Lock ---
-  async acquireUmpireLock(sessionId, username) {
+  // --- User Accounts ---
+  async getUser(username) {
     const store = this._readStore();
-    const currentLock = store.activeUmpireSession || null;
+    const clean = (username || '').trim().toLowerCase();
+    return store.users.find(u => u.username.toLowerCase() === clean) || null;
+  }
 
-    // Check if an umpire session is already active under a different sessionId
-    if (currentLock && currentLock.status === 'ACTIVE' && currentLock.sessionId !== sessionId) {
-      return { acquired: false, existingSession: currentLock };
+  async createUser(user) {
+    const store = this._readStore();
+    const clean = (user.username || '').trim().toLowerCase();
+    const existing = store.users.find(u => u.username.toLowerCase() === clean);
+    if (existing) {
+      throw new Error(`Username "${user.username}" is already taken.`);
+    }
+    store.users.push(user);
+    this._writeStore(store);
+    return user;
+  }
+
+  // --- Single Umpire Session Lock (Heartbeat & TTL based) ---
+  async acquireUmpireLock(sessionId, username, force = false) {
+    const store = this._readStore();
+    const cleanUser = (username || 'umpire').trim().toLowerCase();
+    if (!store.activeUmpireSessions) store.activeUmpireSessions = {};
+
+    const currentLock = store.activeUmpireSessions[cleanUser] || null;
+    const now = Date.now();
+
+    // Stale session check: If no heartbeat in 30 seconds, treat as expired (e.g. browser closed)
+    const isStale = currentLock && (now - (currentLock.lastHeartbeat || 0) > 30000);
+
+    if (currentLock && currentLock.status === 'ACTIVE' && currentLock.sessionId !== sessionId && !isStale && !force) {
+      return { acquired: false, existingSession: currentLock, canForceTakeover: true };
     }
 
     const newLock = {
@@ -306,28 +334,47 @@ export class LocalStorageProvider extends StorageProvider {
       role: 'UMPIRE',
       sessionId,
       loginTime: new Date().toISOString(),
+      lastHeartbeat: now,
       status: 'ACTIVE'
     };
 
-    store.activeUmpireSession = newLock;
+    store.activeUmpireSessions[cleanUser] = newLock;
     this._writeStore(store);
     return { acquired: true, existingSession: newLock };
   }
 
-  async releaseUmpireLock(sessionId) {
+  async heartbeatUmpireLock(sessionId, username) {
     const store = this._readStore();
-    if (store.activeUmpireSession && store.activeUmpireSession.sessionId === sessionId) {
-      store.activeUmpireSession = null;
-      this._writeStore(store);
-      return true;
+    const cleanUser = (username || 'umpire').trim().toLowerCase();
+    if (store.activeUmpireSessions && store.activeUmpireSessions[cleanUser]) {
+      if (store.activeUmpireSessions[cleanUser].sessionId === sessionId) {
+        store.activeUmpireSessions[cleanUser].lastHeartbeat = Date.now();
+        this._writeStore(store);
+        return true;
+      }
     }
     return false;
   }
 
-  async getUmpireLock() {
+  async releaseUmpireLock(sessionId, username) {
     const store = this._readStore();
-    return store.activeUmpireSession || null;
+    const cleanUser = (username || 'umpire').trim().toLowerCase();
+    if (store.activeUmpireSessions && store.activeUmpireSessions[cleanUser]) {
+      if (!sessionId || store.activeUmpireSessions[cleanUser].sessionId === sessionId) {
+        delete store.activeUmpireSessions[cleanUser];
+        this._writeStore(store);
+        return true;
+      }
+    }
+    return false;
   }
+
+  async getUmpireLock(username) {
+    const store = this._readStore();
+    const cleanUser = (username || 'umpire').trim().toLowerCase();
+    return store.activeUmpireSessions?.[cleanUser] || null;
+  }
+
 
   // --- Export & Import ---
   async exportData() {

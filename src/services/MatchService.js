@@ -24,7 +24,7 @@ export class MatchService {
     openingNonStrikerId,
     openingBowlerId
   }) {
-    authService.requireUmpire('create matches');
+    const session = authService.requireUmpire('create matches');
 
     if (!team1Id || !team2Id) {
       throw new Error('Both teams are required.');
@@ -62,6 +62,7 @@ export class MatchService {
       status: 'IN_PROGRESS',
       currentInningsIndex: 0,
       innings: [firstInnings],
+      createdBy: session.username,
       createdAt: now,
       updatedAt: now
     };
@@ -70,22 +71,26 @@ export class MatchService {
   }
 
   async updateMatch(match) {
-    authService.requireUmpire('update matches');
+    authService.requireOwnership(match, 'update this match');
     return await this.provider.updateMatch(match);
   }
 
   async deleteMatch(matchId) {
-    authService.requireUmpire('delete matches');
-    return await this.provider.deleteMatch(matchId);
-  }
-
-  async startSecondInnings(matchId, { strikerId, nonStrikerId, bowlerId }) {
-    authService.requireUmpire('start second innings');
-
     const match = await this.provider.getMatch(matchId);
     if (!match) {
       throw new Error('Match not found.');
     }
+    authService.requireOwnership(match, 'delete this match');
+    return await this.provider.deleteMatch(matchId);
+  }
+
+  async startSecondInnings(matchId, { strikerId, nonStrikerId, bowlerId }) {
+    const match = await this.provider.getMatch(matchId);
+    if (!match) {
+      throw new Error('Match not found.');
+    }
+    authService.requireOwnership(match, 'start second innings on this match');
+
 
     const firstInnings = match.innings[0];
     const secondBattingTeamId = firstInnings.bowlingTeamId;

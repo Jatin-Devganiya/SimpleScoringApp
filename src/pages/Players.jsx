@@ -164,11 +164,18 @@ export default function Players() {
                 >
                   {player.name.charAt(0).toUpperCase()}
                 </div>
-                <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>{player.name}</span>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{player.name}</div>
+                  {player.createdBy && (
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      Added by {authService.canModify(player) ? 'you' : player.createdBy}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* Action buttons visible only to Umpire */}
-              {isUmpire && (
+              {/* Action buttons visible only to the creator Umpire */}
+              {authService.canModify(player) && (
                 <div style={{ display: 'flex', gap: '6px' }}>
                   <button
                     className="btn btn-secondary"
@@ -189,6 +196,7 @@ export default function Players() {
                 </div>
               )}
             </div>
+
           ))}
         </div>
       )}

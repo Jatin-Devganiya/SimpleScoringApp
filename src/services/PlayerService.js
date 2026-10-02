@@ -16,7 +16,7 @@ export class PlayerService {
   }
 
   async createPlayer(name) {
-    authService.requireUmpire('create players');
+    const session = authService.requireUmpire('create players');
 
     const trimmed = (name || '').trim();
     if (!trimmed) {
@@ -36,6 +36,7 @@ export class PlayerService {
     const newPlayer = {
       id: generateId('player'),
       name: trimmed,
+      createdBy: session.username,
       createdAt: now,
       updatedAt: now
     };
@@ -44,8 +45,6 @@ export class PlayerService {
   }
 
   async updatePlayer(playerId, newName) {
-    authService.requireUmpire('edit players');
-
     const trimmed = (newName || '').trim();
     if (!trimmed) {
       throw new Error('Player name is required.');
@@ -55,6 +54,9 @@ export class PlayerService {
     if (!existingPlayer) {
       throw new Error('Player not found.');
     }
+
+    // Only creator umpire can edit
+    authService.requireOwnership(existingPlayer, 'edit this player');
 
     // Check duplicate against other players
     const allPlayers = await this.provider.getPlayers();
@@ -75,9 +77,17 @@ export class PlayerService {
   }
 
   async deletePlayer(playerId) {
-    authService.requireUmpire('delete players');
+    const existingPlayer = await this.provider.getPlayer(playerId);
+    if (!existingPlayer) {
+      throw new Error('Player not found.');
+    }
+
+    // Only creator umpire can delete
+    authService.requireOwnership(existingPlayer, 'delete this player');
+
     return await this.provider.deletePlayer(playerId);
   }
+
 }
 
 export const playerService = new PlayerService();

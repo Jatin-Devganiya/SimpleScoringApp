@@ -291,9 +291,36 @@ export class FirebaseStorageProvider extends StorageProvider {
     }
   }
 
-  // --- Atomic Firebase Umpire Lock ---
-  async acquireUmpireLock(sessionId, username) {
-    const sessionRef = doc(this.db, 'systemSessions', 'umpire');
+  // --- User Accounts ---
+  async getUser(username) {
+    try {
+      const clean = (username || '').trim().toLowerCase();
+      const userRef = doc(this.db, 'users', clean);
+      const snap = await getDoc(userRef);
+      return snap.exists() ? snap.data() : null;
+    } catch (err) {
+      console.error('Firebase getUser error:', err);
+      return null;
+    }
+  }
+
+  async createUser(user) {
+    try {
+      const clean = (user.username || '').trim().toLowerCase();
+      const userRef = doc(this.db, 'users', clean);
+      await setDoc(userRef, user);
+      return user;
+    } catch (err) {
+      console.error('Firebase createUser error:', err);
+      throw new Error(`Unable to create user in Firebase: ${err.message}`);
+    }
+  }
+
+  // --- Atomic Firebase Umpire Lock (Heartbeat & TTL based) ---
+  async acquireUmpireLock(sessionId, username, force = false) {
+    const cleanUser = (username || 'umpire').trim().toLowerCase();
+    const sessionRef = doc(this.db, 'systemSessions', cleanUser);
+    const now = Date.now();
 
     try {
       return await runTransaction(this.db, async (transaction) => {
@@ -301,9 +328,11 @@ export class FirebaseStorageProvider extends StorageProvider {
 
         if (sessionDoc.exists()) {
           const data = sessionDoc.data();
-          // Active lock already exists with a different session ID
-          if (data.status === 'ACTIVE' && data.sessionId !== sessionId) {
-            return { acquired: false, existingSession: data };
+          const isStale = (now - (data.lastHeartbeat || 0)) > 30000;
+
+          // Active lock exists with a different session ID, not stale, and not forced
+          if (data.status === 'ACTIVE' && data.sessionId !== sessionId && !isStale && !force) {
+            return { acquired: false, existingSession: data, canForceTakeover: true };
           }
         }
 
@@ -312,6 +341,7 @@ export class FirebaseStorageProvider extends StorageProvider {
           role: 'UMPIRE',
           sessionId,
           loginTime: new Date().toISOString(),
+          lastHeartbeat: now,
           status: 'ACTIVE'
         };
 
@@ -324,15 +354,29 @@ export class FirebaseStorageProvider extends StorageProvider {
     }
   }
 
-  async releaseUmpireLock(sessionId) {
-    const sessionRef = doc(this.db, 'systemSessions', 'umpire');
+  async heartbeatUmpireLock(sessionId, username) {
+    const cleanUser = (username || 'umpire').trim().toLowerCase();
+    const sessionRef = doc(this.db, 'systemSessions', cleanUser);
+    try {
+      await updateDoc(sessionRef, {
+        lastHeartbeat: Date.now()
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async releaseUmpireLock(sessionId, username) {
+    const cleanUser = (username || 'umpire').trim().toLowerCase();
+    const sessionRef = doc(this.db, 'systemSessions', cleanUser);
 
     try {
       return await runTransaction(this.db, async (transaction) => {
         const sessionDoc = await transaction.get(sessionRef);
         if (sessionDoc.exists()) {
           const data = sessionDoc.data();
-          if (data.sessionId === sessionId) {
+          if (!sessionId || data.sessionId === sessionId) {
             transaction.delete(sessionRef);
             return true;
           }
@@ -345,15 +389,17 @@ export class FirebaseStorageProvider extends StorageProvider {
     }
   }
 
-  async getUmpireLock() {
+  async getUmpireLock(username) {
+    const cleanUser = (username || 'umpire').trim().toLowerCase();
     try {
-      const snap = await getDoc(doc(this.db, 'systemSessions', 'umpire'));
+      const snap = await getDoc(doc(this.db, 'systemSessions', cleanUser));
       return snap.exists() ? snap.data() : null;
     } catch (err) {
       console.warn('Firebase getUmpireLock error:', err);
       return null;
     }
   }
+
 
   // --- Export & Import ---
   async exportData() {

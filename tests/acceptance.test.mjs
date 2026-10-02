@@ -57,46 +57,98 @@ async function runTests() {
   // --------------------------------------------------------------------------
   localStorage.clear();
 
-  // Test 1: Umpire login succeeds when no lock exists
-  const umpireSession1 = await authService.login('umpire', 'umpire123');
-  assert(umpireSession1 && umpireSession1.role === 'UMPIRE', 'Umpire login succeeds when no session exists');
-  assert(authService.isAuthenticated(), 'authService.isAuthenticated() is true for Umpire');
-  assert(authService.isUmpire(), 'authService.isUmpire() is true');
+  // Test 1: Register custom umpire account (no hardcoded predefine required)
+  const regUmpire1 = await authService.register('umpire1', 'pass123', 'UMPIRE');
+  assert(regUmpire1 && regUmpire1.username === 'umpire1', 'Register custom Umpire account succeeds');
+  assert(authService.isUmpire(), 'authService.isUmpire() is true for registered Umpire');
 
-  // Test 2: Second Umpire login fails while first is active
+  // Test 2: Second login for umpire1 fails while first session is active
   let secondUmpireFailed = false;
   try {
-    await authService.login('umpire', 'umpire123');
+    await authService.login('umpire1', 'pass123');
   } catch (err) {
     secondUmpireFailed = true;
-    assert(err.message.includes('currently in use'), 'Second Umpire rejected with lock message');
+    assert(err.canForceTakeover === true, 'Error indicates session can be taken over');
+    assert(err.message.includes('active session'), 'Second Umpire login rejected with active session error');
   }
-  assert(secondUmpireFailed, 'Second Umpire login fails while first session is active');
+  assert(secondUmpireFailed, 'Simultaneous login for same Umpire is rejected');
 
-  // Test 3: Umpire logout releases lock
+  // Test 3: Force Takeover succeeds (e.g. if browser closed without explicit logout)
+  const takenOverSession = await authService.login('umpire1', 'pass123', { force: true });
+  assert(takenOverSession && takenOverSession.username === 'umpire1', 'Force Takeover succeeds without lockout');
   await authService.logout();
-  assert(!authService.isAuthenticated(), 'authService.isAuthenticated() is false after logout');
 
-  // Test 4: Another Umpire can now log in
-  const umpireSession2 = await authService.login('umpire', 'umpire123');
-  assert(umpireSession2 && umpireSession2.sessionId !== umpireSession1.sessionId, 'Another Umpire can log in after logout');
+
+  // Test 4: Another Umpire (umpire2) can register and log in without interference
+  const regUmpire2 = await authService.register('umpire2', 'pass456', 'UMPIRE');
+  assert(regUmpire2 && regUmpire2.username === 'umpire2', 'Different Umpire (umpire2) can log in without lock collision');
   await authService.logout();
 
   // Test 5: Multiple USER logins succeed without lock collision
-  const user1 = await authService.login('user', 'user123');
-  assert(user1 && user1.role === 'USER', 'First USER can login');
+  const user1 = await authService.register('user1', 'pass123', 'USER');
+  assert(user1 && user1.role === 'USER', 'First custom USER can register & login');
   assert(authService.isUser(), 'authService.isUser() is true');
 
-  // Test 6: Second user login also succeeds
-  const user2 = await authService.login('user', 'user123');
-  assert(user2 && user2.role === 'USER', 'Second USER can login simultaneously');
+  const user2 = await authService.register('user2', 'pass456', 'USER');
+  assert(user2 && user2.role === 'USER', 'Second custom USER can login simultaneously');
 
-  // Test 7: Refresh preserves session
+  // Test 6: Refresh preserves session
   const storedSession = authService.getCurrentSession();
-  assert(storedSession && storedSession.username === 'user', 'Session persists in storage across refresh');
+  assert(storedSession && storedSession.username === 'user2', 'Session persists in storage across refresh');
 
   await authService.logout();
   assert(authService.getCurrentSession() === null, 'Logout clears session from storage');
+
+  // --------------------------------------------------------------------------
+  console.log('\n2. MULTI-UMPIRE DATA OWNERSHIP & ISOLATION');
+  // --------------------------------------------------------------------------
+  // Log in as umpire1
+  await authService.login('umpire1', 'pass123');
+  const u1Player = await playerService.createPlayer('U1 Player');
+  assert(u1Player.createdBy === 'umpire1', 'Player created with createdBy: umpire1');
+
+  const u1Team = await teamService.createTeam('U1 Team', [u1Player.id]);
+  assert(u1Team.createdBy === 'umpire1', 'Team created with createdBy: umpire1');
+  await authService.logout();
+
+  // Log in as umpire2
+  await authService.login('umpire2', 'pass456');
+
+  // umpire2 should be BLOCKED from editing or deleting umpire1's player
+  let u2EditBlocked = false;
+  try {
+    await playerService.updatePlayer(u1Player.id, 'Hacked Name');
+  } catch (err) {
+    u2EditBlocked = true;
+    assert(err.message.includes('Only the creator umpire'), 'umpire2 edit rejected with creator message');
+  }
+  assert(u2EditBlocked, 'umpire2 CANNOT edit player created by umpire1');
+
+  let u2DeleteBlocked = false;
+  try {
+    await playerService.deletePlayer(u1Player.id);
+  } catch (err) {
+    u2DeleteBlocked = true;
+  }
+  assert(u2DeleteBlocked, 'umpire2 CANNOT delete player created by umpire1');
+
+  // umpire2 should be BLOCKED from editing or deleting umpire1's team
+  let u2TeamEditBlocked = false;
+  try {
+    await teamService.updateTeam(u1Team.id, { name: 'Hacked Team' });
+  } catch (err) {
+    u2TeamEditBlocked = true;
+  }
+  assert(u2TeamEditBlocked, 'umpire2 CANNOT edit team created by umpire1');
+
+  await authService.logout();
+
+  // Log back in as umpire1 — umpire1 CAN edit their own player and team
+  await authService.login('umpire1', 'pass123');
+  const updatedByU1 = await playerService.updatePlayer(u1Player.id, 'U1 Player Renamed');
+  assert(updatedByU1.name === 'U1 Player Renamed', 'umpire1 CAN edit their own player');
+  await authService.logout();
+
 
   // --------------------------------------------------------------------------
   console.log('\n2. ROLE AUTHORIZATION & MUTATION REJECTIONS');

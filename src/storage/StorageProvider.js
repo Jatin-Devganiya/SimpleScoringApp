@@ -165,29 +165,60 @@ export class StorageProvider {
   }
 
   /**
+   * Retrieves a user by username
+   * @param {string} username
+   * @returns {Promise<Object|null>}
+   */
+  async getUser(username) {
+    throw new Error('Method getUser() must be implemented');
+  }
+
+  /**
+   * Saves/creates a new user
+   * @param {Object} user
+   * @returns {Promise<Object>}
+   */
+  async createUser(user) {
+    throw new Error('Method createUser() must be implemented');
+  }
+
+  /**
    * Attempts to acquire the active Umpire session lock
    * @param {string} sessionId
    * @param {string} username
+   * @param {boolean} force
    * @returns {Promise<{ acquired: boolean, existingSession?: Object }>}
    */
-  async acquireUmpireLock(sessionId, username) {
+  async acquireUmpireLock(sessionId, username, force = false) {
     throw new Error('Method acquireUmpireLock() must be implemented');
+  }
+
+  /**
+   * Updates heartbeat timestamp for active Umpire session lock
+   * @param {string} sessionId
+   * @param {string} username
+   * @returns {Promise<boolean>}
+   */
+  async heartbeatUmpireLock(sessionId, username) {
+    throw new Error('Method heartbeatUmpireLock() must be implemented');
   }
 
   /**
    * Releases active Umpire session lock
    * @param {string} sessionId
+   * @param {string} username
    * @returns {Promise<boolean>}
    */
-  async releaseUmpireLock(sessionId) {
+  async releaseUmpireLock(sessionId, username) {
     throw new Error('Method releaseUmpireLock() must be implemented');
   }
 
   /**
    * Checks current Umpire session lock
+   * @param {string} username
    * @returns {Promise<Object|null>}
    */
-  async getUmpireLock() {
+  async getUmpireLock(username) {
     throw new Error('Method getUmpireLock() must be implemented');
   }
 

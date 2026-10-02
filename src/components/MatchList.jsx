@@ -50,9 +50,16 @@ export default function MatchList({
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px', marginBottom: '14px' }}>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 700 }}>
-                {team1?.name || 'Team 1'} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>vs</span> {team2?.name || 'Team 2'}
-              </h3>
+              <div>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
+                  {team1?.name || 'Team 1'} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>vs</span> {team2?.name || 'Team 2'}
+                </h3>
+                {match.createdBy && (
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    Scored by {authService.canModify(match) ? 'you' : match.createdBy}
+                  </div>
+                )}
+              </div>
 
               {match.result && (
                 <div style={{ color: 'var(--accent-green)', fontWeight: 600, fontSize: '0.9rem' }}>
@@ -61,7 +68,7 @@ export default function MatchList({
               )}
             </div>
 
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
               {!isCompleted && (
                 <button
                   type="button"
@@ -69,7 +76,7 @@ export default function MatchList({
                   style={{ padding: '8px 14px', fontSize: '0.85rem' }}
                   onClick={() => onSelectMatch(match.id)}
                 >
-                  <Play size={14} /> {isUmpire ? 'Resume Scoring' : 'Watch Live Score'}
+                  <Play size={14} /> {authService.canModify(match) ? 'Resume Scoring' : 'Watch Live Score'}
                 </button>
               )}
 
@@ -82,8 +89,8 @@ export default function MatchList({
                 <Eye size={14} /> Scorecard
               </button>
 
-              {/* Delete button only visible to Umpire */}
-              {isUmpire && (
+              {/* Delete button only visible to creator Umpire */}
+              {authService.canModify(match) && (
                 <button
                   type="button"
                   className="btn btn-danger"
@@ -96,6 +103,7 @@ export default function MatchList({
               )}
             </div>
           </div>
+
         );
       })}
     </div>

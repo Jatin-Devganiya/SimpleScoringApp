@@ -52,7 +52,7 @@ export class TeamService {
   }
 
   async createTeam(name, playerIds = []) {
-    authService.requireUmpire('create teams');
+    const session = authService.requireUmpire('create teams');
 
     const trimmedName = (name || '').trim();
     if (!trimmedName) {
@@ -69,6 +69,7 @@ export class TeamService {
       id: generateId('team'),
       name: trimmedName,
       playerIds: sanitizedPlayerIds,
+      createdBy: session.username,
       createdAt: now,
       updatedAt: now
     };
@@ -78,12 +79,13 @@ export class TeamService {
   }
 
   async updateTeam(teamId, data) {
-    authService.requireUmpire('edit teams');
-
     const existing = await this.provider.getTeam(teamId);
     if (!existing) {
       throw new Error('Team not found');
     }
+
+    // Only creator umpire can edit team
+    authService.requireOwnership(existing, 'edit this team');
 
     const allPlayers = await this.provider.getPlayers();
     const validPlayerIdSet = new Set(allPlayers.map(p => p.id));
@@ -106,9 +108,17 @@ export class TeamService {
   }
 
   async deleteTeam(teamId) {
-    authService.requireUmpire('delete teams');
+    const existing = await this.provider.getTeam(teamId);
+    if (!existing) {
+      throw new Error('Team not found');
+    }
+
+    // Only creator umpire can delete team
+    authService.requireOwnership(existing, 'delete this team');
+
     return await this.provider.deleteTeam(teamId);
   }
+
 }
 
 export const teamService = new TeamService();

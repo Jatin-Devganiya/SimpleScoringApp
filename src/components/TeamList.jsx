@@ -22,9 +22,16 @@ export default function TeamList({ teams = [], onEdit, onDelete }) {
       {teams.map((team) => (
         <div key={team.id} className="card" style={{ marginBottom: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700 }}>{team.name}</h3>
-            {/* Actions visible only to Umpire */}
-            {isUmpire && (
+            <div>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0 }}>{team.name}</h3>
+              {team.createdBy && (
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  Created by {authService.canModify(team) ? 'you' : team.createdBy}
+                </div>
+              )}
+            </div>
+            {/* Actions visible only to creator Umpire */}
+            {authService.canModify(team) && (
               <div style={{ display: 'flex', gap: '6px' }}>
                 <button
                   type="button"
@@ -51,6 +58,7 @@ export default function TeamList({ teams = [], onEdit, onDelete }) {
           <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '8px' }}>
             {team.players?.length || 0} Player{(team.players?.length || 0) === 1 ? '' : 's'}
           </div>
+
 
           <div className="chip-container" style={{ maxHeight: '100px', overflowY: 'auto' }}>
             {(team.players || []).map((p) => (

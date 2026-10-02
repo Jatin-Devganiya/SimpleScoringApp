@@ -13,8 +13,15 @@ export class ScoringService {
     return await this.provider.getMatchEvents(matchId);
   }
 
+  async _verifyScorerOwnership(matchId) {
+    const match = await this.provider.getMatch(matchId);
+    if (!match) throw new Error('Match not found.');
+    authService.requireOwnership(match, 'score this match');
+    return match;
+  }
+
   async recordRun(matchId, { runs, strikerId, nonStrikerId, bowlerId, inningsIndex = 0 }) {
-    authService.requireUmpire('record runs');
+    await this._verifyScorerOwnership(matchId);
 
     const events = await this.provider.getMatchEvents(matchId);
     const event = {
@@ -37,7 +44,8 @@ export class ScoringService {
   }
 
   async recordWide(matchId, { extraRuns = 1, batRuns = 0, strikerId, nonStrikerId, bowlerId, inningsIndex = 0 }) {
-    authService.requireUmpire('record wides');
+    await this._verifyScorerOwnership(matchId);
+
 
     const events = await this.provider.getMatchEvents(matchId);
     const totalRuns = extraRuns + batRuns;
@@ -61,7 +69,7 @@ export class ScoringService {
   }
 
   async recordNoBall(matchId, { batRuns = 0, extraRuns = 1, strikerId, nonStrikerId, bowlerId, inningsIndex = 0 }) {
-    authService.requireUmpire('record no balls');
+    await this._verifyScorerOwnership(matchId);
 
     const events = await this.provider.getMatchEvents(matchId);
     const totalRuns = extraRuns + batRuns;
@@ -93,7 +101,7 @@ export class ScoringService {
     inningsIndex = 0,
     runs = 0
   }) {
-    authService.requireUmpire('record wickets');
+    await this._verifyScorerOwnership(matchId);
 
     const events = await this.provider.getMatchEvents(matchId);
     const event = {
@@ -118,7 +126,7 @@ export class ScoringService {
   }
 
   async declareBatsmen(matchId, { strikerId, nonStrikerId, inningsIndex = 0 }) {
-    authService.requireUmpire('declare batsmen');
+    const match = await this._verifyScorerOwnership(matchId);
 
     if (!strikerId || !nonStrikerId) {
       throw new Error('Both striker and non-striker must be selected.');
@@ -126,9 +134,6 @@ export class ScoringService {
     if (strikerId === nonStrikerId) {
       throw new Error('Striker and Non-Striker must be different players.');
     }
-
-    const match = await this.provider.getMatch(matchId);
-    if (!match) throw new Error('Match not found');
 
     const currentInnings = match.innings[inningsIndex];
     const updatedInningsList = [...match.innings];
@@ -145,14 +150,11 @@ export class ScoringService {
   }
 
   async setNextBowler(matchId, { bowlerId, inningsIndex = 0 }) {
-    authService.requireUmpire('change bowler');
+    const match = await this._verifyScorerOwnership(matchId);
 
     if (!bowlerId) {
       throw new Error('Please select a valid bowler.');
     }
-
-    const match = await this.provider.getMatch(matchId);
-    if (!match) throw new Error('Match not found');
 
     const currentInnings = match.innings[inningsIndex];
     const updatedInningsList = [...match.innings];
@@ -168,9 +170,10 @@ export class ScoringService {
   }
 
   async undoLastEvent(matchId) {
-    authService.requireUmpire('undo deliveries');
+    await this._verifyScorerOwnership(matchId);
     return await this.provider.deleteMatchEvent(matchId);
   }
+
 
   async getCompleteMatchState(matchId) {
     const match = await this.provider.getMatch(matchId);
