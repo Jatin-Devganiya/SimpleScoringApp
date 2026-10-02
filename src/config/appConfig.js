@@ -6,9 +6,13 @@
  * - false: Firebase Cloud Firestore
  */
 
-// Reads Vite environment variable: false enables Firebase mode
-const envStorageFlag = import.meta.env.VITE_USE_LOCAL_STORAGE;
+// Reads Vite environment variable: false enables Firebase mode, defaults to process.env if in Node
+const envStorageFlag = (typeof import.meta !== 'undefined' && import.meta.env)
+  ? import.meta.env.VITE_USE_LOCAL_STORAGE
+  : (typeof process !== 'undefined' && process.env ? process.env.VITE_USE_LOCAL_STORAGE : 'true');
+
 const isLocalStorage = envStorageFlag === 'true';
+
 
 export const appConfig = {
   USE_LOCAL_STORAGE: isLocalStorage,

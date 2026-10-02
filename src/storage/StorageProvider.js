@@ -4,6 +4,50 @@
  */
 export class StorageProvider {
   /**
+   * Retrieves all players
+   * @returns {Promise<Array>}
+   */
+  async getPlayers() {
+    throw new Error('Method getPlayers() must be implemented');
+  }
+
+  /**
+   * Retrieves a player by ID
+   * @param {string} playerId 
+   * @returns {Promise<Object|null>}
+   */
+  async getPlayer(playerId) {
+    throw new Error('Method getPlayer() must be implemented');
+  }
+
+  /**
+   * Saves a new player
+   * @param {Object} player 
+   * @returns {Promise<Object>}
+   */
+  async createPlayer(player) {
+    throw new Error('Method createPlayer() must be implemented');
+  }
+
+  /**
+   * Updates an existing player
+   * @param {Object} player 
+   * @returns {Promise<Object>}
+   */
+  async updatePlayer(player) {
+    throw new Error('Method updatePlayer() must be implemented');
+  }
+
+  /**
+   * Deletes a player by ID
+   * @param {string} playerId 
+   * @returns {Promise<boolean>}
+   */
+  async deletePlayer(playerId) {
+    throw new Error('Method deletePlayer() must be implemented');
+  }
+
+  /**
    * Retrieves all teams
    * @returns {Promise<Array>}
    */
@@ -118,6 +162,33 @@ export class StorageProvider {
    */
   async deleteMatchEvent(matchId, eventId) {
     throw new Error('Method deleteMatchEvent() must be implemented');
+  }
+
+  /**
+   * Attempts to acquire the active Umpire session lock
+   * @param {string} sessionId
+   * @param {string} username
+   * @returns {Promise<{ acquired: boolean, existingSession?: Object }>}
+   */
+  async acquireUmpireLock(sessionId, username) {
+    throw new Error('Method acquireUmpireLock() must be implemented');
+  }
+
+  /**
+   * Releases active Umpire session lock
+   * @param {string} sessionId
+   * @returns {Promise<boolean>}
+   */
+  async releaseUmpireLock(sessionId) {
+    throw new Error('Method releaseUmpireLock() must be implemented');
+  }
+
+  /**
+   * Checks current Umpire session lock
+   * @returns {Promise<Object|null>}
+   */
+  async getUmpireLock() {
+    throw new Error('Method getUmpireLock() must be implemented');
   }
 
   /**

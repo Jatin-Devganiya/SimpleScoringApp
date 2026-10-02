@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { teamService } from '../services/TeamService';
+import { authService } from '../services/AuthService';
 import TeamList from '../components/TeamList';
 import TeamForm from '../components/TeamForm';
-import { Plus } from 'lucide-react';
+import { Plus, Users } from 'lucide-react';
 
-export default function Teams() {
+export default function Teams({ onNavigateToPlayers }) {
   const [teams, setTeams] = useState([]);
   const [editingTeam, setEditingTeam] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState(null);
+
+  const isUmpire = authService.isUmpire();
 
   const loadTeams = async () => {
     try {
@@ -33,7 +36,7 @@ export default function Teams() {
         await teamService.updateTeam(teamData.id, teamData);
         setFeedback({ type: 'success', message: 'Team updated successfully.' });
       } else {
-        await teamService.createTeam(teamData.name, teamData.players);
+        await teamService.createTeam(teamData.name, teamData.playerIds);
         setFeedback({ type: 'success', message: 'Team created successfully.' });
       }
       setShowForm(false);
@@ -59,8 +62,16 @@ export default function Teams() {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">Teams Management</h1>
-        {!showForm && (
+        <div>
+          <h1 className="page-title">
+            <Users size={24} /> Teams
+          </h1>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+            {teams.length} team{teams.length === 1 ? '' : 's'} registered
+          </p>
+        </div>
+
+        {isUmpire && !showForm && (
           <button
             className="btn btn-primary"
             onClick={() => {
@@ -79,7 +90,7 @@ export default function Teams() {
         </div>
       )}
 
-      {showForm ? (
+      {showForm && isUmpire ? (
         <TeamForm
           initialTeam={editingTeam}
           onSave={handleSaveTeam}
@@ -87,6 +98,7 @@ export default function Teams() {
             setShowForm(false);
             setEditingTeam(null);
           }}
+          onNavigateToPlayers={onNavigateToPlayers}
         />
       ) : loading ? (
         <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>

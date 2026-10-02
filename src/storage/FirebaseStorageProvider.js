@@ -1,5 +1,5 @@
-import { StorageProvider } from './StorageProvider';
-import { getFirebaseDb } from '../config/firebaseConfig';
+import { StorageProvider } from './StorageProvider.js';
+import { getFirebaseDb } from '../config/firebaseConfig.js';
 import {
   collection,
   doc,
@@ -11,25 +11,97 @@ import {
   query,
   orderBy,
   onSnapshot,
-  writeBatch
+  writeBatch,
+  runTransaction
 } from 'firebase/firestore';
 
 /**
  * Firebase Firestore implementation of StorageProvider
- * Persists data to Cloud Firestore without leaking Firestore details to the UI.
+ * Persists players, teams, matches, events, and atomic umpire session locks to Cloud Firestore.
  */
 export class FirebaseStorageProvider extends StorageProvider {
   constructor() {
     super();
-    // Validates Firebase environment variables; throws clear error if unconfigured
     this.db = getFirebaseDb();
   }
 
+  // --- Players Management ---
+  async getPlayers() {
+    try {
+      const snap = await getDocs(collection(this.db, 'players'));
+      const players = [];
+      snap.forEach(d => players.push(d.data()));
+      return players.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    } catch (err) {
+      console.error('Firebase getPlayers failed:', err);
+      throw new Error(`Unable to fetch players from Firebase: ${err.message}`);
+    }
+  }
+
+  async getPlayer(playerId) {
+    try {
+      const ref = doc(this.db, 'players', playerId);
+      const snap = await getDoc(ref);
+      return snap.exists() ? snap.data() : null;
+    } catch (err) {
+      console.error('Firebase getPlayer failed:', err);
+      throw new Error(`Unable to fetch player: ${err.message}`);
+    }
+  }
+
+  async createPlayer(player) {
+    try {
+      const now = new Date().toISOString();
+      const payload = {
+        ...player,
+        createdAt: player.createdAt || now,
+        updatedAt: now
+      };
+      await setDoc(doc(this.db, 'players', player.id), payload);
+      return payload;
+    } catch (err) {
+      console.error('Firebase createPlayer failed:', err);
+      throw new Error(`Unable to create player in Firebase: ${err.message}`);
+    }
+  }
+
+  async updatePlayer(player) {
+    try {
+      const now = new Date().toISOString();
+      const payload = {
+        ...player,
+        updatedAt: now
+      };
+      await updateDoc(doc(this.db, 'players', player.id), payload);
+      return payload;
+    } catch (err) {
+      console.error('Firebase updatePlayer failed:', err);
+      throw new Error(`Unable to update player in Firebase: ${err.message}`);
+    }
+  }
+
+  async deletePlayer(playerId) {
+    try {
+      await deleteDoc(doc(this.db, 'players', playerId));
+      return true;
+    } catch (err) {
+      console.error('Firebase deletePlayer failed:', err);
+      throw new Error(`Unable to delete player from Firebase: ${err.message}`);
+    }
+  }
+
+  // --- Teams Management ---
   async getTeams() {
     try {
       const snap = await getDocs(collection(this.db, 'teams'));
       const teams = [];
-      snap.forEach(d => teams.push(d.data()));
+      snap.forEach(d => {
+        const data = d.data();
+        teams.push({
+          ...data,
+          playerIds: Array.isArray(data.playerIds) ? data.playerIds : []
+        });
+      });
       return teams;
     } catch (err) {
       console.error('Firebase getTeams failed:', err);
@@ -41,7 +113,12 @@ export class FirebaseStorageProvider extends StorageProvider {
     try {
       const ref = doc(this.db, 'teams', teamId);
       const snap = await getDoc(ref);
-      return snap.exists() ? snap.data() : null;
+      if (!snap.exists()) return null;
+      const data = snap.data();
+      return {
+        ...data,
+        playerIds: Array.isArray(data.playerIds) ? data.playerIds : []
+      };
     } catch (err) {
       console.error('Firebase getTeam failed:', err);
       throw new Error(`Unable to fetch team: ${err.message}`);
@@ -53,6 +130,7 @@ export class FirebaseStorageProvider extends StorageProvider {
       const now = new Date().toISOString();
       const payload = {
         ...team,
+        playerIds: Array.isArray(team.playerIds) ? team.playerIds : [],
         createdAt: team.createdAt || now,
         updatedAt: now
       };
@@ -69,6 +147,7 @@ export class FirebaseStorageProvider extends StorageProvider {
       const now = new Date().toISOString();
       const payload = {
         ...team,
+        playerIds: Array.isArray(team.playerIds) ? team.playerIds : [],
         updatedAt: now
       };
       await updateDoc(doc(this.db, 'teams', team.id), payload);
@@ -89,6 +168,7 @@ export class FirebaseStorageProvider extends StorageProvider {
     }
   }
 
+  // --- Matches Management ---
   async getMatches() {
     try {
       const snap = await getDocs(collection(this.db, 'matches'));
@@ -145,7 +225,6 @@ export class FirebaseStorageProvider extends StorageProvider {
 
   async deleteMatch(matchId) {
     try {
-      // Delete all subcollection events first
       const eventsSnap = await getDocs(collection(this.db, 'matches', matchId, 'events'));
       const batch = writeBatch(this.db);
       eventsSnap.forEach(d => batch.delete(d.ref));
@@ -183,7 +262,6 @@ export class FirebaseStorageProvider extends StorageProvider {
       };
       await setDoc(doc(this.db, 'matches', matchId, 'events', event.id), payload);
       
-      // Update parent match updatedAt timestamp
       await updateDoc(doc(this.db, 'matches', matchId), {
         updatedAt: now
       });
@@ -198,7 +276,6 @@ export class FirebaseStorageProvider extends StorageProvider {
   async deleteMatchEvent(matchId, eventId) {
     try {
       if (!eventId) {
-        // Find last event by sequence
         const events = await this.getMatchEvents(matchId);
         if (events.length === 0) return false;
         eventId = events[events.length - 1].id;
@@ -214,8 +291,74 @@ export class FirebaseStorageProvider extends StorageProvider {
     }
   }
 
+  // --- Atomic Firebase Umpire Lock ---
+  async acquireUmpireLock(sessionId, username) {
+    const sessionRef = doc(this.db, 'systemSessions', 'umpire');
+
+    try {
+      return await runTransaction(this.db, async (transaction) => {
+        const sessionDoc = await transaction.get(sessionRef);
+
+        if (sessionDoc.exists()) {
+          const data = sessionDoc.data();
+          // Active lock already exists with a different session ID
+          if (data.status === 'ACTIVE' && data.sessionId !== sessionId) {
+            return { acquired: false, existingSession: data };
+          }
+        }
+
+        const newLock = {
+          username: username || 'umpire',
+          role: 'UMPIRE',
+          sessionId,
+          loginTime: new Date().toISOString(),
+          status: 'ACTIVE'
+        };
+
+        transaction.set(sessionRef, newLock);
+        return { acquired: true, existingSession: newLock };
+      });
+    } catch (err) {
+      console.error('Firebase acquireUmpireLock transaction failed:', err);
+      throw new Error(`Failed to verify umpire session lock: ${err.message}`);
+    }
+  }
+
+  async releaseUmpireLock(sessionId) {
+    const sessionRef = doc(this.db, 'systemSessions', 'umpire');
+
+    try {
+      return await runTransaction(this.db, async (transaction) => {
+        const sessionDoc = await transaction.get(sessionRef);
+        if (sessionDoc.exists()) {
+          const data = sessionDoc.data();
+          if (data.sessionId === sessionId) {
+            transaction.delete(sessionRef);
+            return true;
+          }
+        }
+        return false;
+      });
+    } catch (err) {
+      console.error('Firebase releaseUmpireLock error:', err);
+      return false;
+    }
+  }
+
+  async getUmpireLock() {
+    try {
+      const snap = await getDoc(doc(this.db, 'systemSessions', 'umpire'));
+      return snap.exists() ? snap.data() : null;
+    } catch (err) {
+      console.warn('Firebase getUmpireLock error:', err);
+      return null;
+    }
+  }
+
+  // --- Export & Import ---
   async exportData() {
     try {
+      const players = await this.getPlayers();
       const teams = await this.getTeams();
       const matches = await this.getMatches();
       const events = {};
@@ -226,11 +369,13 @@ export class FirebaseStorageProvider extends StorageProvider {
 
       return {
         version: 1,
+        players,
         teams,
         matches,
         events,
         metadata: {
           exportedAt: new Date().toISOString(),
+          totalPlayers: players.length,
           totalTeams: teams.length,
           totalMatches: matches.length,
           source: 'firebase'
@@ -248,14 +393,21 @@ export class FirebaseStorageProvider extends StorageProvider {
     }
 
     try {
-      // Write teams
+      // Import players
+      if (Array.isArray(data.players)) {
+        for (const player of data.players) {
+          await setDoc(doc(this.db, 'players', player.id), player);
+        }
+      }
+
+      // Import teams
       if (Array.isArray(data.teams)) {
         for (const team of data.teams) {
           await setDoc(doc(this.db, 'teams', team.id), team);
         }
       }
 
-      // Write matches and their events
+      // Import matches and events
       if (Array.isArray(data.matches)) {
         for (const match of data.matches) {
           await setDoc(doc(this.db, 'matches', match.id), match);
@@ -283,6 +435,11 @@ export class FirebaseStorageProvider extends StorageProvider {
       for (const t of teams) {
         await this.deleteTeam(t.id);
       }
+      const players = await this.getPlayers();
+      for (const p of players) {
+        await this.deletePlayer(p.id);
+      }
+      await deleteDoc(doc(this.db, 'systemSessions', 'umpire'));
       return true;
     } catch (err) {
       console.error('Firebase clearAllData failed:', err);

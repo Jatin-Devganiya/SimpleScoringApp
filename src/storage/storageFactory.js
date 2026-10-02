@@ -1,6 +1,6 @@
-import { appConfig } from '../config/appConfig';
-import { LocalStorageProvider } from './LocalStorageProvider';
-import { FirebaseStorageProvider } from './FirebaseStorageProvider';
+import { appConfig } from '../config/appConfig.js';
+import { LocalStorageProvider } from './LocalStorageProvider.js';
+import { FirebaseStorageProvider } from './FirebaseStorageProvider.js';
 
 let providerInstance = null;
 

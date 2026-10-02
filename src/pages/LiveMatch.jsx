@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { scoringService } from '../services/ScoringService';
 import { matchService } from '../services/MatchService';
+import { authService } from '../services/AuthService';
 import { storageProvider } from '../storage/storageFactory';
 import LiveScore from '../components/LiveScore';
 import BattingScore from '../components/BattingScore';
 import BowlingScore from '../components/BowlingScore';
 import CurrentOver from '../components/CurrentOver';
 import ScoreButtons from '../components/ScoreButtons';
-import { ArrowLeft, RotateCcw, AlertTriangle, CheckCircle, FileText } from 'lucide-react';
+import { ArrowLeft, CheckCircle, FileText, UserCheck, ShieldAlert, AlertTriangle } from 'lucide-react';
 
 export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
   const [matchState, setMatchState] = useState(null);
@@ -17,14 +18,20 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
   // Modals state
   const [showWicketModal, setShowWicketModal] = useState(false);
   const [showBowlerModal, setShowBowlerModal] = useState(false);
+  const [showDeclareModal, setShowDeclareModal] = useState(false);
   const [showSecondInningsModal, setShowSecondInningsModal] = useState(false);
 
-  // Form states for modals
+  // Modal form states
   const [newBatsmanId, setNewBatsmanId] = useState('');
   const [newBowlerId, setNewBowlerId] = useState('');
+  const [declareStrikerId, setDeclareStrikerId] = useState('');
+  const [declareNonStrikerId, setDeclareNonStrikerId] = useState('');
+
   const [secondInningsStriker, setSecondInningsStriker] = useState('');
   const [secondInningsNonStriker, setSecondInningsNonStriker] = useState('');
   const [secondInningsBowler, setSecondInningsBowler] = useState('');
+
+  const isUmpire = authService.isUmpire();
 
   const loadMatchState = useCallback(async () => {
     try {
@@ -37,7 +44,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
       setMatchState(state);
 
       // Auto-save completion if match finished
-      if (state.isMatchCompleted && state.match.status !== 'COMPLETED') {
+      if (state.isMatchCompleted && state.match.status !== 'COMPLETED' && isUmpire) {
         await matchService.completeMatch(matchId, state.matchResult);
       }
     } catch (err) {
@@ -46,12 +53,11 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
     } finally {
       setLoading(false);
     }
-  }, [matchId]);
+  }, [matchId, isUmpire]);
 
   useEffect(() => {
     loadMatchState();
 
-    // Subscribe to match changes
     const unsub = storageProvider.subscribeToMatch(matchId, () => {
       loadMatchState();
     });
@@ -60,6 +66,17 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
       if (typeof unsub === 'function') unsub();
     };
   }, [matchId, loadMatchState]);
+
+  // Check if an over just completed to automatically open Next Bowler modal for Umpire
+  useEffect(() => {
+    if (!matchState || !isUmpire) return;
+    const currentInningsIndex = matchState.match.currentInningsIndex || 0;
+    const inningsData = currentInningsIndex === 0 ? matchState.innings1 : matchState.innings2;
+
+    if (inningsData?.pendingNewBowler && !inningsData?.isInningsCompleted && !matchState.isMatchCompleted) {
+      setShowBowlerModal(true);
+    }
+  }, [matchState, isUmpire]);
 
   if (loading && !matchState) {
     return (
@@ -85,8 +102,6 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
 
   const {
     match,
-    team1,
-    team2,
     events,
     innings1,
     innings2,
@@ -106,7 +121,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
   const nonStrikerStats = currentInningsData?.batsmanStats?.[currentInningsData?.nonStrikerId];
   const bowlerStats = currentInningsData?.bowlerStats?.[currentInningsData?.currentBowlerId];
 
-  // Candidates for replacement batsman
+  // Eligible replacement batsmen (batting team members not out and not currently batting)
   const availableBatsmen = (activeBattingTeam?.players || []).filter(p => {
     const stat = currentInningsData?.batsmanStats?.[p.id];
     const isOut = stat?.isOut;
@@ -115,19 +130,23 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
     return !isOut && !isCurrentStriker && !isCurrentNonStriker;
   });
 
-  // Candidates for bowling change
-  const eligibleBowlers = (activeBowlingTeam?.players || []).filter(p => {
-    // If team has more than 1 player, bowler cannot bowl 2 consecutive overs
+  // Eligible next bowlers (consecutive over restriction: current bowler cannot bowl next over if >1 bowler in squad)
+  const eligibleNextBowlers = (activeBowlingTeam?.players || []).filter(p => {
     if ((activeBowlingTeam?.players?.length || 0) > 1) {
       return p.id !== currentInningsData?.currentBowlerId;
     }
     return true;
   });
 
-  // Check if first innings just completed
+  // Eligible batsmen for declaration (all non-out batting team players)
+  const nonOutBattingSquad = (activeBattingTeam?.players || []).filter(p => {
+    const stat = currentInningsData?.batsmanStats?.[p.id];
+    return !stat?.isOut;
+  });
+
   const isFirstInningsFinished = currentInningsIndex === 0 && currentInningsData?.isInningsCompleted;
 
-  // Actions
+  // --- Scoring Event Handlers (Umpire only) ---
   const handleRun = async (runs) => {
     try {
       await scoringService.recordRun(matchId, {
@@ -201,21 +220,14 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
 
   const handleConfirmNewBowler = async () => {
     if (!newBowlerId) {
-      alert('Please select a bowler.');
+      alert('Please select the next bowler.');
       return;
     }
 
     try {
-      // Over change persists with event or direct match bowler state
-      const currentInnings = match.innings[currentInningsIndex];
-      const updatedInningsList = [...match.innings];
-      updatedInningsList[currentInningsIndex] = {
-        ...currentInnings,
-        bowlerId: newBowlerId
-      };
-      await matchService.updateMatch({
-        ...match,
-        innings: updatedInningsList
+      await scoringService.setNextBowler(matchId, {
+        bowlerId: newBowlerId,
+        inningsIndex: currentInningsIndex
       });
 
       setShowBowlerModal(false);
@@ -226,9 +238,32 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
     }
   };
 
+  const handleConfirmDeclareBatsmen = async () => {
+    if (!declareStrikerId || !declareNonStrikerId) {
+      alert('Please select both striker and non-striker.');
+      return;
+    }
+    if (declareStrikerId === declareNonStrikerId) {
+      alert('Striker and Non-Striker must be different players.');
+      return;
+    }
+
+    try {
+      await scoringService.declareBatsmen(matchId, {
+        strikerId: declareStrikerId,
+        nonStrikerId: declareNonStrikerId,
+        inningsIndex: currentInningsIndex
+      });
+      setShowDeclareModal(false);
+      await loadMatchState();
+    } catch (err) {
+      alert(`Declare batsmen error: ${err.message}`);
+    }
+  };
+
   const handleStartSecondInnings = async () => {
     if (!secondInningsStriker || !secondInningsNonStriker || !secondInningsBowler) {
-      alert('Please select both opening batsmen and the opening bowler for the 2nd innings.');
+      alert('Please select opening batsmen and the opening bowler for the 2nd innings.');
       return;
     }
     if (secondInningsStriker === secondInningsNonStriker) {
@@ -269,6 +304,21 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
         </button>
 
         <div style={{ display: 'flex', gap: '8px' }}>
+          {isUmpire && !isFirstInningsFinished && !isMatchCompleted && (
+            <button
+              className="btn btn-secondary"
+              onClick={() => {
+                setDeclareStrikerId(currentInningsData?.strikerId || '');
+                setDeclareNonStrikerId(currentInningsData?.nonStrikerId || '');
+                setShowDeclareModal(true);
+              }}
+              style={{ padding: '8px 14px', fontSize: '0.85rem' }}
+              title="Explicitly set Striker and Non-Striker"
+            >
+              <UserCheck size={16} /> Declare Batsmen
+            </button>
+          )}
+
           <button
             className="btn btn-secondary"
             onClick={() => onViewScorecard(matchId)}
@@ -278,6 +328,14 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
           </button>
         </div>
       </div>
+
+      {/* Read-Only Viewer Notice for User role */}
+      {!isUmpire && (
+        <div className="alert-box alert-success" style={{ background: 'rgba(59, 130, 246, 0.1)', borderColor: 'rgba(59, 130, 246, 0.3)', color: '#93c5fd' }}>
+          <ShieldAlert size={18} />
+          <span>You are viewing this match in read-only mode (Role: USER). Only an active Umpire can record scoring events.</span>
+        </div>
+      )}
 
       {/* Main Scoreboard Display */}
       <LiveScore
@@ -308,22 +366,26 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
             {firstBattingTeam?.name} scored <strong>{innings1?.score}/{innings1?.wickets}</strong> in {innings1?.overs} overs.
             Target for {secondBattingTeam?.name} is <strong>{(innings1?.score || 0) + 1}</strong> runs.
           </p>
-          <button
-            className="btn btn-primary"
-            style={{ margin: '0 auto' }}
-            onClick={() => {
-              if (secondBattingTeam?.players?.length >= 2) {
-                setSecondInningsStriker(secondBattingTeam.players[0].id);
-                setSecondInningsNonStriker(secondBattingTeam.players[1].id);
-              }
-              if (firstBattingTeam?.players?.length >= 1) {
-                setSecondInningsBowler(firstBattingTeam.players[0].id);
-              }
-              setShowSecondInningsModal(true);
-            }}
-          >
-            Start Second Innings
-          </button>
+          {isUmpire ? (
+            <button
+              className="btn btn-primary"
+              style={{ margin: '0 auto' }}
+              onClick={() => {
+                if (secondBattingTeam?.players?.length >= 2) {
+                  setSecondInningsStriker(secondBattingTeam.players[0].id);
+                  setSecondInningsNonStriker(secondBattingTeam.players[1].id);
+                }
+                if (firstBattingTeam?.players?.length >= 1) {
+                  setSecondInningsBowler(firstBattingTeam.players[0].id);
+                }
+                setShowSecondInningsModal(true);
+              }}
+            >
+              Start Second Innings
+            </button>
+          ) : (
+            <p style={{ fontStyle: 'italic', color: 'var(--text-muted)' }}>Waiting for the Umpire to start 2nd Innings...</p>
+          )}
         </div>
       )}
 
@@ -356,7 +418,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
             />
             <BowlingScore
               bowlerStats={bowlerStats}
-              onSwitchBowlerClick={() => setShowBowlerModal(true)}
+              onSwitchBowlerClick={isUmpire ? () => setShowBowlerModal(true) : null}
             />
           </div>
 
@@ -366,40 +428,46 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
             overNumber={Math.floor((currentInningsData?.legalBalls || 0) / 6)}
           />
 
-          {/* Prompt bowler change if over is complete */}
-          {currentInningsData?.pendingNewBowler && (
+          {/* Over complete alert prompt for Umpire */}
+          {currentInningsData?.pendingNewBowler && isUmpire && (
             <div className="alert-box alert-success" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>Over complete! Please select the bowler for the next over.</span>
+              <span>Over complete (6 legal balls)! Please select the bowler for the next over.</span>
               <button
                 className="btn btn-secondary"
                 style={{ padding: '6px 12px', fontSize: '0.8rem' }}
                 onClick={() => setShowBowlerModal(true)}
               >
-                Select Bowler
+                Select Next Bowler
               </button>
             </div>
           )}
 
-          {/* Large Scoring Buttons */}
-          <ScoreButtons
-            onRun={handleRun}
-            onWide={handleWide}
-            onNoBall={handleNoBall}
-            onWicketClick={() => {
-              if (availableBatsmen.length > 0) {
-                setNewBatsmanId(availableBatsmen[0].id);
-              }
-              setShowWicketModal(true);
-            }}
-            onUndo={handleUndo}
-            canUndo={canUndo}
-            disabled={currentInningsData?.isInningsCompleted || isMatchCompleted}
-          />
+          {/* Large Scoring Buttons (VISIBLE ONLY TO UMPIRE) */}
+          {isUmpire ? (
+            <ScoreButtons
+              onRun={handleRun}
+              onWide={handleWide}
+              onNoBall={handleNoBall}
+              onWicketClick={() => {
+                if (availableBatsmen.length > 0) {
+                  setNewBatsmanId(availableBatsmen[0].id);
+                }
+                setShowWicketModal(true);
+              }}
+              onUndo={handleUndo}
+              canUndo={canUndo}
+              disabled={currentInningsData?.isInningsCompleted || isMatchCompleted || currentInningsData?.pendingNewBowler}
+            />
+          ) : (
+            <div className="card" style={{ textAlign: 'center', padding: '16px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              Scoring keypad is disabled for normal viewers. Umpire controls the match in real time.
+            </div>
+          )}
         </>
       )}
 
       {/* Wicket Modal */}
-      {showWicketModal && (
+      {showWicketModal && isUmpire && (
         <div className="modal-overlay">
           <div className="modal-card">
             <h3 className="modal-title" style={{ color: 'var(--accent-red)' }}>Wicket Fallen!</h3>
@@ -409,13 +477,14 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
 
             {availableBatsmen.length > 0 ? (
               <div className="form-group">
-                <label className="form-label">Incoming Batsman</label>
+                <label className="form-label">Incoming Batsman (Batting Squad)</label>
                 <select
                   className="form-select"
                   value={newBatsmanId}
                   onChange={(e) => setNewBatsmanId(e.target.value)}
                   required
                 >
+                  <option value="">-- Choose incoming batsman --</option>
                   {availableBatsmen.map((p) => (
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
@@ -423,7 +492,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
               </div>
             ) : (
               <div className="alert-box alert-error">
-                <span>All available batsmen have been dismissed (All Out)!</span>
+                <span>All available batsmen in the team have been dismissed (All Out)!</span>
               </div>
             )}
 
@@ -432,6 +501,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
                 className="btn btn-danger"
                 style={{ flex: 1 }}
                 onClick={handleConfirmWicket}
+                disabled={availableBatsmen.length > 0 && !newBatsmanId}
               >
                 Confirm Wicket
               </button>
@@ -446,12 +516,19 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
         </div>
       )}
 
-      {/* Change Bowler Modal */}
-      {showBowlerModal && (
+      {/* Next Bowler Modal (Automatic after 6 legal deliveries) */}
+      {showBowlerModal && isUmpire && (
         <div className="modal-overlay">
           <div className="modal-card">
-            <h3 className="modal-title">Select Bowler</h3>
-            <p className="modal-desc">Choose who will bowl the next delivery:</p>
+            <h3 className="modal-title">
+              {currentInningsData?.pendingNewBowler ? 'Over Completed - Select Next Bowler' : 'Change Bowler'}
+            </h3>
+            <p className="modal-desc">
+              {bowlerStats?.name && (
+                <span>Previous over bowled by <strong>{bowlerStats.name}</strong>. </span>
+              )}
+              Select the bowler for the next over:
+            </p>
 
             <div className="form-group">
               <label className="form-label">Eligible Bowlers ({activeBowlingTeam?.name})</label>
@@ -460,8 +537,8 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
                 value={newBowlerId}
                 onChange={(e) => setNewBowlerId(e.target.value)}
               >
-                <option value="">-- Choose bowler --</option>
-                {eligibleBowlers.map((p) => (
+                <option value="">-- Select next bowler --</option>
+                {eligibleNextBowlers.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
                   </option>
@@ -476,11 +553,74 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
                 onClick={handleConfirmNewBowler}
                 disabled={!newBowlerId}
               >
-                Set Bowler
+                Continue Over
+              </button>
+              {!currentInningsData?.pendingNewBowler && (
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setShowBowlerModal(false)}
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Declare Batsmen Modal */}
+      {showDeclareModal && isUmpire && (
+        <div className="modal-overlay">
+          <div className="modal-card">
+            <h3 className="modal-title">Declare Batsmen</h3>
+            <p className="modal-desc">
+              Explicitly set who is on strike and at the non-striker end:
+            </p>
+
+            <div className="form-group">
+              <label className="form-label">Striker (★)</label>
+              <select
+                className="form-select"
+                value={declareStrikerId}
+                onChange={(e) => setDeclareStrikerId(e.target.value)}
+                required
+              >
+                <option value="">-- Choose Striker --</option>
+                {nonOutBattingSquad.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Non-Striker</label>
+              <select
+                className="form-select"
+                value={declareNonStrikerId}
+                onChange={(e) => setDeclareNonStrikerId(e.target.value)}
+                required
+              >
+                <option value="">-- Choose Non-Striker --</option>
+                {nonOutBattingSquad.map((p) => (
+                  <option key={p.id} value={p.id} disabled={p.id === declareStrikerId}>
+                    {p.name} {p.id === declareStrikerId ? '(Selected as Striker)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                onClick={handleConfirmDeclareBatsmen}
+                disabled={!declareStrikerId || !declareNonStrikerId || declareStrikerId === declareNonStrikerId}
+              >
+                Confirm Batsmen
               </button>
               <button
                 className="btn btn-secondary"
-                onClick={() => setShowBowlerModal(false)}
+                onClick={() => setShowDeclareModal(false)}
               >
                 Cancel
               </button>
@@ -490,12 +630,12 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
       )}
 
       {/* Start 2nd Innings Modal */}
-      {showSecondInningsModal && (
+      {showSecondInningsModal && isUmpire && (
         <div className="modal-overlay">
           <div className="modal-card">
             <h3 className="modal-title">Setup 2nd Innings</h3>
             <p className="modal-desc">
-              {secondBattingTeam?.name} batting to chase target of <strong>{(innings1?.score || 0) + 1}</strong>
+              {secondBattingTeam?.name} chasing target of <strong>{(innings1?.score || 0) + 1}</strong>
             </p>
 
             <div className="form-group">

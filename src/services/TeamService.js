@@ -1,109 +1,113 @@
-import { storageProvider } from '../storage/storageFactory';
-import { generateId } from '../utils/ids';
+import { storageProvider } from '../storage/storageFactory.js';
+import { generateId } from '../utils/ids.js';
+import { authService } from './AuthService.js';
 
 export class TeamService {
   constructor(provider = storageProvider) {
     this.provider = provider;
   }
 
+  /**
+   * Helper to resolve team player objects from playerIds with backward compatibility
+   * @param {Object} team 
+   * @param {Array} allPlayers 
+   * @returns {Object} team with resolved .players array
+   */
+  _resolveTeamPlayers(team, allPlayers = []) {
+    if (!team) return null;
+    const playerMap = new Map(allPlayers.map(p => [p.id, p]));
+
+    // Resolve playerIds to player objects
+    let resolvedPlayers = [];
+    if (Array.isArray(team.playerIds) && team.playerIds.length > 0) {
+      resolvedPlayers = team.playerIds
+        .map(id => playerMap.get(id))
+        .filter(Boolean);
+    } else if (Array.isArray(team.players)) {
+      // Backward compatibility for legacy teams
+      resolvedPlayers = team.players;
+    }
+
+    return {
+      ...team,
+      playerIds: Array.isArray(team.playerIds) ? team.playerIds : resolvedPlayers.map(p => p.id),
+      players: resolvedPlayers
+    };
+  }
+
   async getTeams() {
-    return await this.provider.getTeams();
+    const [rawTeams, allPlayers] = await Promise.all([
+      this.provider.getTeams(),
+      this.provider.getPlayers()
+    ]);
+    return rawTeams.map(t => this._resolveTeamPlayers(t, allPlayers));
   }
 
   async getTeam(teamId) {
-    return await this.provider.getTeam(teamId);
+    const [rawTeam, allPlayers] = await Promise.all([
+      this.provider.getTeam(teamId),
+      this.provider.getPlayers()
+    ]);
+    return this._resolveTeamPlayers(rawTeam, allPlayers);
   }
 
-  async createTeam(name, playerNames = []) {
+  async createTeam(name, playerIds = []) {
+    authService.requireUmpire('create teams');
+
     const trimmedName = (name || '').trim();
     if (!trimmedName) {
       throw new Error('Team name is required.');
     }
 
-    const players = playerNames
-      .map(pName => (typeof pName === 'string' ? pName.trim() : pName?.name?.trim()))
-      .filter(Boolean)
-      .map(pName => ({
-        id: generateId('player'),
-        name: pName
-      }));
+    // Validate player IDs against registered players
+    const allPlayers = await this.provider.getPlayers();
+    const validPlayerIdSet = new Set(allPlayers.map(p => p.id));
+    const sanitizedPlayerIds = Array.from(new Set(playerIds.filter(id => validPlayerIdSet.has(id))));
 
+    const now = new Date().toISOString();
     const newTeam = {
       id: generateId('team'),
       name: trimmedName,
-      players,
-      createdAt: new Date().toISOString()
+      playerIds: sanitizedPlayerIds,
+      createdAt: now,
+      updatedAt: now
     };
 
-    return await this.provider.createTeam(newTeam);
+    const saved = await this.provider.createTeam(newTeam);
+    return this._resolveTeamPlayers(saved, allPlayers);
   }
 
   async updateTeam(teamId, data) {
+    authService.requireUmpire('edit teams');
+
     const existing = await this.provider.getTeam(teamId);
     if (!existing) {
       throw new Error('Team not found');
     }
 
+    const allPlayers = await this.provider.getPlayers();
+    const validPlayerIdSet = new Set(allPlayers.map(p => p.id));
+
+    let sanitizedPlayerIds = existing.playerIds || [];
+    if (data.playerIds !== undefined) {
+      sanitizedPlayerIds = Array.from(new Set(data.playerIds.filter(id => validPlayerIdSet.has(id))));
+    }
+
     const updated = {
       ...existing,
       ...data,
-      name: (data.name || existing.name).trim(),
+      name: (data.name !== undefined ? data.name : existing.name).trim(),
+      playerIds: sanitizedPlayerIds,
       updatedAt: new Date().toISOString()
     };
 
-    return await this.provider.updateTeam(updated);
+    const saved = await this.provider.updateTeam(updated);
+    return this._resolveTeamPlayers(saved, allPlayers);
   }
 
   async deleteTeam(teamId) {
+    authService.requireUmpire('delete teams');
     return await this.provider.deleteTeam(teamId);
-  }
-
-  async addPlayer(teamId, playerName) {
-    const trimmed = (playerName || '').trim();
-    if (!trimmed) {
-      throw new Error('Player name cannot be empty.');
-    }
-
-    const team = await this.provider.getTeam(teamId);
-    if (!team) {
-      throw new Error('Team not found.');
-    }
-
-    const newPlayer = {
-      id: generateId('player'),
-      name: trimmed
-    };
-
-    const updatedPlayers = [...(team.players || []), newPlayer];
-    return await this.updateTeam(teamId, { players: updatedPlayers });
-  }
-
-  async updatePlayer(teamId, playerId, newName) {
-    const trimmed = (newName || '').trim();
-    if (!trimmed) {
-      throw new Error('Player name cannot be empty.');
-    }
-
-    const team = await this.provider.getTeam(teamId);
-    if (!team) {
-      throw new Error('Team not found.');
-    }
-
-    const updatedPlayers = (team.players || []).map(p =>
-      p.id === playerId ? { ...p, name: trimmed } : p
-    );
-
-    return await this.updateTeam(teamId, { players: updatedPlayers });
-  }
-
-  async deletePlayer(teamId, playerId) {
-    const team = await this.provider.getTeam(teamId);
-    if (!team) {
-      throw new Error('Team not found.');
-    }
-
-    const updatedPlayers = (team.players || []).filter(p => p.id !== playerId);
-    return await this.updateTeam(teamId, { players: updatedPlayers });
   }
 }
 

@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { matchService } from '../services/MatchService';
 import { teamService } from '../services/TeamService';
+import { authService } from '../services/AuthService';
 import MatchList from '../components/MatchList';
 import MatchForm from '../components/MatchForm';
-import { Plus } from 'lucide-react';
+import { Plus, Trophy } from 'lucide-react';
 
 export default function Matches({ onSelectMatch, onViewScorecard }) {
   const [matches, setMatches] = useState([]);
@@ -12,6 +13,8 @@ export default function Matches({ onSelectMatch, onViewScorecard }) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState(null);
+
+  const isUmpire = authService.isUmpire();
 
   const loadData = async () => {
     try {
@@ -61,8 +64,17 @@ export default function Matches({ onSelectMatch, onViewScorecard }) {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">Matches</h1>
-        {!showCreateForm && (
+        <div>
+          <h1 className="page-title">
+            <Trophy size={24} /> Matches
+          </h1>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+            {matches.length} match{matches.length === 1 ? '' : 'es'} recorded
+          </p>
+        </div>
+
+        {/* New match button visible only to Umpire */}
+        {isUmpire && !showCreateForm && (
           <button
             className="btn btn-primary"
             onClick={() => {
@@ -84,7 +96,7 @@ export default function Matches({ onSelectMatch, onViewScorecard }) {
         </div>
       )}
 
-      {showCreateForm ? (
+      {showCreateForm && isUmpire ? (
         <MatchForm
           teams={teams}
           onStartMatch={handleStartMatch}

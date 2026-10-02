@@ -1,9 +1,10 @@
-import { StorageProvider } from './StorageProvider';
-import { appConfig } from '../config/appConfig';
+import { StorageProvider } from './StorageProvider.js';
+import { appConfig } from '../config/appConfig.js';
+import { UMPIRE_LOCK_KEY } from '../config/authConfig.js';
 
 /**
  * LocalStorage implementation of StorageProvider
- * Stores all teams, matches, and match events in browser localStorage.
+ * Stores all players, teams, matches, match events, and umpire locks in browser localStorage.
  */
 export class LocalStorageProvider extends StorageProvider {
   constructor() {
@@ -24,9 +25,11 @@ export class LocalStorageProvider extends StorageProvider {
       }
       return {
         version: parsed.version || 1,
+        players: Array.isArray(parsed.players) ? parsed.players : [],
         teams: Array.isArray(parsed.teams) ? parsed.teams : [],
         matches: Array.isArray(parsed.matches) ? parsed.matches : [],
         events: parsed.events && typeof parsed.events === 'object' ? parsed.events : {},
+        activeUmpireSession: parsed.activeUmpireSession || null,
         metadata: parsed.metadata || { lastUpdated: new Date().toISOString() }
       };
     } catch (err) {
@@ -56,9 +59,11 @@ export class LocalStorageProvider extends StorageProvider {
   _getEmptyStore() {
     return {
       version: appConfig.APP_VERSION || 1,
+      players: [],
       teams: [],
       matches: [],
       events: {},
+      activeUmpireSession: null,
       metadata: {
         lastUpdated: new Date().toISOString()
       }
@@ -74,6 +79,60 @@ export class LocalStorageProvider extends StorageProvider {
     }
   }
 
+  // --- Players Management ---
+  async getPlayers() {
+    const store = this._readStore();
+    return store.players.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }
+
+  async getPlayer(playerId) {
+    const store = this._readStore();
+    return store.players.find(p => p.id === playerId) || null;
+  }
+
+  async createPlayer(player) {
+    const store = this._readStore();
+    const now = new Date().toISOString();
+    const newPlayer = {
+      ...player,
+      createdAt: player.createdAt || now,
+      updatedAt: now
+    };
+    store.players.push(newPlayer);
+    this._writeStore(store);
+    return newPlayer;
+  }
+
+  async updatePlayer(player) {
+    const store = this._readStore();
+    const index = store.players.findIndex(p => p.id === player.id);
+    if (index === -1) {
+      throw new Error(`Player with id ${player.id} not found.`);
+    }
+    const updated = {
+      ...store.players[index],
+      ...player,
+      updatedAt: new Date().toISOString()
+    };
+    store.players[index] = updated;
+    this._writeStore(store);
+    return updated;
+  }
+
+  async deletePlayer(playerId) {
+    const store = this._readStore();
+    store.players = store.players.filter(p => p.id !== playerId);
+    // Also remove player from teams' playerIds
+    store.teams.forEach(team => {
+      if (Array.isArray(team.playerIds)) {
+        team.playerIds = team.playerIds.filter(id => id !== playerId);
+      }
+    });
+    this._writeStore(store);
+    return true;
+  }
+
+  // --- Teams Management ---
   async getTeams() {
     const store = this._readStore();
     return store.teams;
@@ -90,6 +149,7 @@ export class LocalStorageProvider extends StorageProvider {
     const now = new Date().toISOString();
     const newTeam = {
       ...team,
+      playerIds: Array.isArray(team.playerIds) ? team.playerIds : [],
       createdAt: team.createdAt || now,
       updatedAt: now
     };
@@ -114,6 +174,7 @@ export class LocalStorageProvider extends StorageProvider {
     const updated = {
       ...store.teams[index],
       ...team,
+      playerIds: Array.isArray(team.playerIds) ? team.playerIds : (store.teams[index].playerIds || []),
       updatedAt: new Date().toISOString()
     };
     store.teams[index] = updated;
@@ -128,9 +189,9 @@ export class LocalStorageProvider extends StorageProvider {
     return true;
   }
 
+  // --- Matches Management ---
   async getMatches() {
     const store = this._readStore();
-    // Return sorted newest first
     return [...store.matches].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   }
 
@@ -180,6 +241,7 @@ export class LocalStorageProvider extends StorageProvider {
     return true;
   }
 
+  // --- Match Events ---
   async getMatchEvents(matchId) {
     const store = this._readStore();
     const matchEvents = store.events[matchId] || [];
@@ -198,7 +260,6 @@ export class LocalStorageProvider extends StorageProvider {
     };
     store.events[matchId].push(newEvent);
 
-    // Update match's updatedAt
     const mIdx = store.matches.findIndex(m => m.id === matchId);
     if (mIdx !== -1) {
       store.matches[mIdx].updatedAt = new Date().toISOString();
@@ -217,7 +278,6 @@ export class LocalStorageProvider extends StorageProvider {
     if (eventId) {
       store.events[matchId] = store.events[matchId].filter(e => e.id !== eventId);
     } else {
-      // Pop last event
       store.events[matchId].pop();
     }
 
@@ -231,16 +291,56 @@ export class LocalStorageProvider extends StorageProvider {
     return true;
   }
 
+  // --- Single Umpire Session Lock ---
+  async acquireUmpireLock(sessionId, username) {
+    const store = this._readStore();
+    const currentLock = store.activeUmpireSession || null;
+
+    // Check if an umpire session is already active under a different sessionId
+    if (currentLock && currentLock.status === 'ACTIVE' && currentLock.sessionId !== sessionId) {
+      return { acquired: false, existingSession: currentLock };
+    }
+
+    const newLock = {
+      username: username || 'umpire',
+      role: 'UMPIRE',
+      sessionId,
+      loginTime: new Date().toISOString(),
+      status: 'ACTIVE'
+    };
+
+    store.activeUmpireSession = newLock;
+    this._writeStore(store);
+    return { acquired: true, existingSession: newLock };
+  }
+
+  async releaseUmpireLock(sessionId) {
+    const store = this._readStore();
+    if (store.activeUmpireSession && store.activeUmpireSession.sessionId === sessionId) {
+      store.activeUmpireSession = null;
+      this._writeStore(store);
+      return true;
+    }
+    return false;
+  }
+
+  async getUmpireLock() {
+    const store = this._readStore();
+    return store.activeUmpireSession || null;
+  }
+
+  // --- Export & Import ---
   async exportData() {
     const store = this._readStore();
-    // Build standard export format matching schema
     return {
       version: 1,
+      players: store.players,
       teams: store.teams,
       matches: store.matches,
       events: store.events,
       metadata: {
         exportedAt: new Date().toISOString(),
+        totalPlayers: store.players.length,
         totalTeams: store.teams.length,
         totalMatches: store.matches.length
       }
@@ -253,9 +353,11 @@ export class LocalStorageProvider extends StorageProvider {
     }
     const store = {
       version: data.version || 1,
+      players: Array.isArray(data.players) ? data.players : [],
       teams: Array.isArray(data.teams) ? data.teams : [],
       matches: Array.isArray(data.matches) ? data.matches : [],
       events: data.events && typeof data.events === 'object' ? data.events : {},
+      activeUmpireSession: null,
       metadata: {
         importedAt: new Date().toISOString(),
         lastUpdated: new Date().toISOString()

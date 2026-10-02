@@ -1,6 +1,7 @@
 import React from 'react';
-import { Play, Eye, Trash2, Calendar, Trophy } from 'lucide-react';
+import { Play, Eye, Trash2, Calendar, Radio } from 'lucide-react';
 import { formatDateTime } from '../utils/formatters';
+import { authService } from '../services/AuthService';
 
 export default function MatchList({
   matches = [],
@@ -9,12 +10,16 @@ export default function MatchList({
   onViewScorecard,
   onDeleteMatch
 }) {
+  const isUmpire = authService.isUmpire();
+
   if (matches.length === 0) {
     return (
       <div className="card empty-state">
-        <Trophy size={48} className="empty-state-icon" />
+        <Radio size={48} className="empty-state-icon" />
         <h3 style={{ marginBottom: '6px' }}>No matches recorded</h3>
-        <p style={{ fontSize: '0.9rem' }}>Create your first match to start live cricket scoring.</p>
+        <p style={{ fontSize: '0.9rem' }}>
+          {isUmpire ? 'Click "New Match" to setup and score a match.' : 'No matches available to view.'}
+        </p>
       </div>
     );
   }
@@ -31,7 +36,7 @@ export default function MatchList({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span className={`storage-badge ${isCompleted ? '' : 'local'}`} style={{ fontSize: '0.7rem' }}>
-                  {isCompleted ? 'COMPLETED' : 'IN PROGRESS'}
+                  {isCompleted ? 'COMPLETED' : 'LIVE'}
                 </span>
                 <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                   {match.totalOvers} Overs
@@ -64,7 +69,7 @@ export default function MatchList({
                   style={{ padding: '8px 14px', fontSize: '0.85rem' }}
                   onClick={() => onSelectMatch(match.id)}
                 >
-                  <Play size={14} /> Resume Scoring
+                  <Play size={14} /> {isUmpire ? 'Resume Scoring' : 'Watch Live Score'}
                 </button>
               )}
 
@@ -77,15 +82,18 @@ export default function MatchList({
                 <Eye size={14} /> Scorecard
               </button>
 
-              <button
-                type="button"
-                className="btn btn-danger"
-                style={{ padding: '8px 14px', fontSize: '0.85rem', marginLeft: 'auto' }}
-                onClick={() => onDeleteMatch(match.id)}
-                title="Delete Match"
-              >
-                <Trash2 size={14} />
-              </button>
+              {/* Delete button only visible to Umpire */}
+              {isUmpire && (
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  style={{ padding: '8px 14px', fontSize: '0.85rem', marginLeft: 'auto' }}
+                  onClick={() => onDeleteMatch(match.id)}
+                  title="Delete Match"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
             </div>
           </div>
         );

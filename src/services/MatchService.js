@@ -1,5 +1,6 @@
-import { storageProvider } from '../storage/storageFactory';
-import { generateId } from '../utils/ids';
+import { storageProvider } from '../storage/storageFactory.js';
+import { generateId } from '../utils/ids.js';
+import { authService } from './AuthService.js';
 
 export class MatchService {
   constructor(provider = storageProvider) {
@@ -23,6 +24,8 @@ export class MatchService {
     openingNonStrikerId,
     openingBowlerId
   }) {
+    authService.requireUmpire('create matches');
+
     if (!team1Id || !team2Id) {
       throw new Error('Both teams are required.');
     }
@@ -67,14 +70,18 @@ export class MatchService {
   }
 
   async updateMatch(match) {
+    authService.requireUmpire('update matches');
     return await this.provider.updateMatch(match);
   }
 
   async deleteMatch(matchId) {
+    authService.requireUmpire('delete matches');
     return await this.provider.deleteMatch(matchId);
   }
 
   async startSecondInnings(matchId, { strikerId, nonStrikerId, bowlerId }) {
+    authService.requireUmpire('start second innings');
+
     const match = await this.provider.getMatch(matchId);
     if (!match) {
       throw new Error('Match not found.');
@@ -111,6 +118,8 @@ export class MatchService {
   }
 
   async completeMatch(matchId, matchResult) {
+    authService.requireUmpire('complete matches');
+
     const match = await this.provider.getMatch(matchId);
     if (!match) return null;
 

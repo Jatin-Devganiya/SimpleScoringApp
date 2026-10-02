@@ -1,115 +1,149 @@
-# Simple Live Cricket Scoring Web App
+# LiveCricket — Live Cricket Scoring Web Application
 
-A fast, mobile-friendly live cricket scoring application built with React.js featuring interchangeable persistence providers: **LocalStorage** and **Firebase Cloud Firestore**.
+A fast, mobile-responsive live cricket scoring web application built with **ReactJS** featuring interchangeable persistence engines: **LocalStorage** and **Firebase Cloud Firestore**.
 
-The entire application operates against a unified repository/service interface, allowing you to toggle between LocalStorage and Firebase with a single feature flag without altering any UI components or scoring logic.
-
----
-
-## Architecture Overview
+The application operates against a common repository / data-access layer:
 
 ```text
-                       React UI
-                          │
-                  Application Services
-                 (Team, Match, Scoring)
-                          │
-                    Scoring Engine
-                 (Pure Cricket Rules)
-                          │
-                  Storage Interface
-                 (StorageProvider.js)
-                          │
-             ┌────────────┴────────────┐
-             │                         │
-     LocalStorageProvider     FirebaseStorageProvider
-             │                         │
-        LocalStorage            Cloud Firestore
+                    React UI
+                       │
+                       ▼
+              Authentication Layer
+                       │
+                       ▼
+              Authorization Layer
+                       │
+                       ▼
+               Business Services
+          (Player, Team, Match, Scoring)
+                       │
+             ┌─────────┴─────────┐
+             ▼                   ▼
+      LocalStorage Repo    Firebase Repo
+             │                   │
+             ▼                   ▼
+        LocalStorage          Firestore
 ```
-
-### Key Principles
-
-1. **Storage Decoupling**: React components NEVER call `localStorage` or `firebase.firestore` directly. All operations go through `storageProvider`.
-2. **Pure Cricket Scoring Engine**: The scoring rules (runs, wides, no-balls, wickets, strike rotation, overs formatting, economy, strike rate, target, RRR, and undo) reside in a single pure engine (`src/engines/scoringEngine.js`).
-3. **Event-Based Delivery Model**: Every delivery is stored as an event. Undo is deterministic and recomputes exact match state reliably.
-4. **Cross-Storage Portability**: Backup JSON files (`cricket-score-backup-YYYY-MM-DD.json`) exported from LocalStorage can be imported directly into Firebase, and vice-versa.
 
 ---
 
-## Getting Started
+## 1. Authentication & Role-Based Access
 
-### 1. Installation
+The application features a predefined-user login system without public signup.
 
-```bash
-npm install
-```
+### Predefined User Accounts
 
-### 2. Running Locally
+| Username | Password | Role | Permissions | Concurrency Rule |
+| :--- | :--- | :--- | :--- | :--- |
+| **`umpire`** | `umpire123` | **`UMPIRE`** | Full CRUD & scoring (Teams, Players, Matches, Scorecards) | **Single Active Session Lock** (Only 1 Umpire at a time) |
+| **`user`** | `user123` | **`USER`** | Read-Only (View Matches, Teams, Players, Live Scores) | **Multi-user** (Multiple users allowed simultaneously) |
 
-```bash
-npm run dev
-```
+> Credentials can be customized in [src/config/authConfig.js](file:///d:/Projects/SimpleScoringApp/src/config/authConfig.js).
 
-Visit `http://localhost:3000` in your browser.
+### Single Umpire Session Lock
+
+1. **Umpire Login**: When an Umpire logs in, an active session lock is created.
+2. **Concurrent Rejection**: If another person attempts an Umpire login while a session is active, the login is rejected with:
+   > *"The Umpire account is currently in use. Please try again after the existing Umpire session is completed."*
+3. **Session Persistence**: The lock survives page refreshes, browser tab reloads, and component re-renders.
+4. **Lock Release**: The lock is released only when the Umpire explicitly logs out.
+5. **Firebase Atomic Transaction**: In Firebase mode, lock acquisition is performed via `runTransaction` on the `/systemSessions/umpire` document, preventing race conditions.
+6. **LocalStorage Mode**: In LocalStorage mode, lock state is managed via `cricketApp.activeUmpireSession`.
+
+### Two-Layer Security & Authorization
+
+1. **UI Layer**: Mutation controls (`Add Player`, `Edit`, `Delete`, `New Match`, Scoring Keypad, `Declare Batsman`, `Change Bowler`) are completely hidden for `USER` role.
+2. **Service / Repository Layer**: Every mutation (`create`, `update`, `delete`, `recordRun`, `recordWicket`, etc.) enforces `authService.requireUmpire()`. Even if invoked programmatically, mutations by unauthorized users are rejected.
 
 ---
 
-## Storage Modes & Configuration
+## 2. Key Features
 
-### Mode 1: LocalStorage (Default)
+### Players Management (`/players`)
+- Master player list with **Add**, **Edit**, **Delete**, and search functionality.
+- Case-insensitive duplicate player name prevention (e.g. `Virat Kohli` vs `virat kohli`).
+- Whitespace trimming and empty name rejection.
 
-In `.env`:
+### Team Management with Normalized Players
+- Teams store normalized player IDs: `playerIds: string[]`.
+- Multi-select dropdown allows selecting only from registered Players.
+- Backward-compatible with legacy teams having embedded players.
+
+### Live Scoring & Match Rules
+- **Legal Delivery Tracking**: Overs are tracked strictly by 6 legal deliveries. Wides and No Balls do NOT count toward the 6 legal balls.
+- **Automatic Next Bowler Popup**: Triggers immediately after the 6th legal delivery of an over. The completed over's bowler cannot be selected as the next bowler.
+- **Declare Batsmen**: Scorer can explicitly assign Striker and Non-Striker positions.
+- **Wicket Dismissal**: Prompts scorer to select replacement batsman from non-dismissed batting squad members.
+- **Strike Rotation**: Strike rotates on odd runs (1, 3, 5) and at the end of each over.
+- **Full Undo**: Reverts scoring events and recalculates exact match state.
+
+---
+
+## 3. Storage Modes & Configuration
+
+The application uses the feature flag in `.env`:
 
 ```env
-VITE_USE_LOCAL_STORAGE=true
+# Set to 'true' for LocalStorage, 'false' for Firebase Cloud Firestore
+VITE_USE_LOCAL_STORAGE=false
 ```
 
-- Zero cloud dependencies or Firebase configuration required.
-- Operates completely offline in the browser.
-- Data persists across refreshes in browser `localStorage`.
+### Mode 1: LocalStorage Mode (`VITE_USE_LOCAL_STORAGE=true`)
+- Zero external cloud dependencies.
+- Operates 100% offline in browser storage.
+- Active Umpire session stored in `cricketApp.activeUmpireSession`.
 
-### Mode 2: Firebase Cloud Firestore
-
-In `.env`:
+### Mode 2: Firebase Mode (`VITE_USE_LOCAL_STORAGE=false`)
+- Real-time cloud sync with Firebase Cloud Firestore.
+- Requires Firebase configuration in `.env`:
 
 ```env
 VITE_USE_LOCAL_STORAGE=false
-
-VITE_FIREBASE_API_KEY=your_api_key
-VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=your_project_id
-VITE_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
-VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-VITE_FIREBASE_APP_ID=your_app_id
+VITE_FIREBASE_API_KEY="your-api-key"
+VITE_FIREBASE_AUTH_DOMAIN="your-app.firebaseapp.com"
+VITE_FIREBASE_PROJECT_ID="your-project-id"
+VITE_FIREBASE_STORAGE_BUCKET="your-app.firebasestorage.app"
+VITE_FIREBASE_MESSAGING_SENDER_ID="your-sender-id"
+VITE_FIREBASE_APP_ID="your-app-id"
 ```
 
-If `VITE_USE_LOCAL_STORAGE=false` is set but credentials are missing, the app displays a clear startup error rather than silently failing.
+---
 
-#### Firebase Setup Guide
+## 4. Firestore Setup & Security Rules
 
-1. Go to the [Firebase Console](https://console.firebase.google.com/).
-2. Create a new Firebase project.
-3. In **Build > Firestore Database**, click **Create Database** (start in Test Mode or Production Mode).
-4. Deploy the security rules provided in [firestore.rules](file:///d:/Projects/SimpleScoringApp/firestore.rules).
-5. In **Project Settings**, add a **Web App** and copy the configuration parameters into your `.env` file.
+1. Create a Firebase Project in the [Firebase Console](https://console.firebase.google.com/).
+2. Enable Cloud Firestore in Production Mode.
+3. Deploy the following security rules in [firestore.rules](file:///d:/Projects/SimpleScoringApp/firestore.rules):
 
-#### Firestore Security Rules
-
-See [firestore.rules](file:///d:/Projects/SimpleScoringApp/firestore.rules):
-
-```text
+```javascript
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Teams collection
     match /teams/{teamId} {
       allow read, write: if true;
     }
+
+    // Players collection
+    match /players/{playerId} {
+      allow read, write: if true;
+    }
+
+    // Matches and nested events
     match /matches/{matchId} {
       allow read, write: if true;
+
       match /events/{eventId} {
         allow read, write: if true;
       }
     }
+
+    // System sessions for single-umpire concurrency lock
+    match /systemSessions/{sessionId} {
+      allow read, write: if true;
+    }
+
+    // Deny access to any other collections
     match /{document=**} {
       allow read, write: if false;
     }
@@ -117,48 +151,56 @@ service cloud.firestore {
 }
 ```
 
-> **Security Note:** This initial version operates without user authentication for simplicity. In production multi-tenant deployments, Firebase Authentication and user-level match ownership rules should be implemented.
+---
+
+## 5. Local Development & Running Tests
+
+### Install Dependencies
+```bash
+npm install
+```
+
+### Run Acceptance Tests
+To run the automated test suite covering all 53 acceptance criteria:
+```bash
+npm test
+```
+
+### Run Locally
+```bash
+npm run dev
+```
+
+Visit `http://localhost:3000` (or the port indicated by Vite).
 
 ---
 
-## Features
+## 6. Hosting & Deployment
 
-- **Team & Player Management**: Add, edit, and remove teams and squad members.
-- **Match Setup**: Configurable overs (5, 10, 15, 20, 50), batting/bowling team selection, and opening lineups.
-- **Live Scoring Pad**: Large mobile-friendly buttons for `0`, `1`, `2`, `3`, `4`, `6`, `WICKET`, `WIDE`, `NO BALL`, and `UNDO LAST BALL`.
-- **Accurate Cricket Rules**:
-  - Overs tracked strictly by legal balls (e.g. `0.0`, `0.1`, ... `1.0`).
-  - Strike rotation on odd runs (1, 3, 5) and end of overs.
-  - Active striker marked with `★ STRIKER`.
-  - Wides: +1 run, +1 extra, bowler runs +1, legal balls unchanged.
-  - No Balls: +1 extra run, optional bat runs (`0, 1, 2, 3, 4, 6`), bowler runs incremented, legal balls unchanged.
-  - Wickets: Dismissal record, prompts scorer to pick replacement batsman from non-out squad members.
-  - Bowling change enforcement after each completed over.
-- **Second Innings & Target**: Automatic target computation (`1st innings score + 1`), required runs, remaining balls, and Required Run Rate (RRR).
-- **Match Completion**: Detects target achieved, overs completed, or all-out with calculated margin of victory.
-- **Undo**: Full historical rollback restoring all batsman, bowler, over, and match statistics.
-- **Scorecards**: Comprehensive batting (R, B, 4s, 6s, SR) and bowling (O, R, W, Econ) tables.
-- **Backup & Migration**: 1-click export and import of standard JSON backups (`cricket-score-backup-YYYY-MM-DD.json`).
-- **Data Wipe**: Safe data wipe functionality with confirmation.
+### Render Static Site
+1. Create a **New Static Site** on [Render](https://render.com/).
+2. Connect your GitHub repository: `https://github.com/Jatin-Devganiya/SimpleScoringApp`.
+3. Configure settings:
+   - **Build Command**: `npm run build`
+   - **Publish Directory**: `dist`
+4. In **Environment Variables**, add:
+   - `VITE_USE_LOCAL_STORAGE`: `false` (or `true`)
+   - Add your Firebase keys if `VITE_USE_LOCAL_STORAGE=false`.
+5. Click **Create Static Site**.
+
+### GitHub Pages Deployment
+```bash
+npm run deploy
+```
 
 ---
 
-## Acceptance Testing Guide
+## 7. Troubleshooting
 
-### 1. LocalStorage Acceptance Test
-1. Set `VITE_USE_LOCAL_STORAGE=true` in `.env`.
-2. Launch `npm run dev`.
-3. Click "Seed Sample Teams" or create Team A and Team B with at least 5 players each.
-4. Create a 5-over match: Team A batting first.
-5. Record deliveries: `1`, `4`, `0`, `6`, `WICKET` (select replacement batsman), `2`, `WIDE`, `NO BALL (+4)`, `4`.
-6. Verify score, wickets, legal balls, strike rotation, current over pills, and statistics.
-7. Click "UNDO LAST BALL" — verify score and strike revert seamlessly.
-8. Refresh the browser — verify match state and events remain fully intact.
-9. Navigate to Settings and click "Export Backup (JSON)".
-
-### 2. Cross-Storage Migration Test
-1. Set `VITE_USE_LOCAL_STORAGE=false` in `.env` and fill in Firebase credentials.
-2. Restart the app.
-3. Verify the header shows `Storage: Firebase`.
-4. Navigate to Settings and import the backup JSON exported from LocalStorage.
-5. Verify that all teams, matches, scores, and events are restored into Firebase Firestore.
+- **"The Umpire account is currently in use"**:
+  - Another browser tab or user is actively logged in as Umpire.
+  - To release the lock, log out from the active session, or clear `cricketApp.activeUmpireSession` in LocalStorage / delete `/systemSessions/umpire` in Firestore.
+- **Firebase missing configuration warning**:
+  - Verify that your `.env` contains all required `VITE_FIREBASE_*` variables and restart the dev server.
+- **Player not showing in team dropdown**:
+  - Players must first be added in the **Players** menu before they can be assigned to a team.
