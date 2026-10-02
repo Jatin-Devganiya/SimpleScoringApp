@@ -23,6 +23,16 @@ export class AuthService {
     if (session && session.role === ROLES.UMPIRE && session.sessionId) {
       this.startHeartbeat();
     }
+
+    if (typeof window !== 'undefined' && !this._unloadListenerAttached) {
+      this._unloadListenerAttached = true;
+      window.addEventListener('beforeunload', () => {
+        const s = this.getCurrentSession();
+        if (s && s.role === ROLES.UMPIRE && s.sessionId) {
+          this.provider.releaseUmpireLock(s.sessionId, s.username);
+        }
+      });
+    }
   }
 
   getCurrentSession() {
@@ -203,12 +213,12 @@ export class AuthService {
 
     // Single active session restriction for UMPIRE role
     if (user.role === ROLES.UMPIRE) {
-      const result = await this.provider.acquireUmpireLock(sessionId, user.username, !!options.force);
+      const result = await this.provider.acquireUmpireLock(sessionId, user.username);
       if (!result.acquired) {
         const lockErr = new Error(
-          `The Umpire account "${user.username}" currently has an active session. If you closed your browser without logging out, click "Take Over Session" below to continue.`
+          `This Umpire account "${user.username}" is currently logged in on another device. Simultaneous logins with the same Umpire credentials are not permitted. Please log out from the other session first.`
         );
-        lockErr.canForceTakeover = true;
+        lockErr.isUmpireLocked = true;
         lockErr.username = user.username;
         throw lockErr;
       }
@@ -241,7 +251,7 @@ export class AuthService {
         } catch (e) {
           console.warn('Heartbeat update failed:', e);
         }
-      }, 15000);
+      }, 10000);
     }
   }
 

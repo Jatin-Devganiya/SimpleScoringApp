@@ -125,6 +125,52 @@ export class ScoringService {
     return await this.provider.saveMatchEvent(matchId, event);
   }
 
+  async declareBatsman(matchId, { declaredPlayerId, replacementPlayerId, inningsIndex = 0 }) {
+    await this._verifyScorerOwnership(matchId);
+
+    if (!declaredPlayerId) {
+      throw new Error('Please select which batsman to declare.');
+    }
+    if (!replacementPlayerId) {
+      throw new Error('Please select a replacement batsman.');
+    }
+    if (declaredPlayerId === replacementPlayerId) {
+      throw new Error('Replacement batsman must be different from the declared batsman.');
+    }
+
+    const state = await this.getCompleteMatchState(matchId);
+    const inningsData = state?.innings?.[inningsIndex];
+    if (!inningsData) {
+      throw new Error('Innings data could not be found.');
+    }
+
+    const currentStrikerId = inningsData.strikerId;
+    const currentNonStrikerId = inningsData.nonStrikerId;
+
+    if (declaredPlayerId !== currentStrikerId && declaredPlayerId !== currentNonStrikerId) {
+      throw new Error('Declared batsman must be currently batting on strike or non-strike.');
+    }
+
+    const nextStrikerId = declaredPlayerId === currentStrikerId ? replacementPlayerId : currentStrikerId;
+    const nextNonStrikerId = declaredPlayerId === currentNonStrikerId ? replacementPlayerId : currentNonStrikerId;
+
+    const event = {
+      id: generateId('event'),
+      type: EVENT_TYPES.DECLARE,
+      inningsIndex,
+      declaredPlayerId,
+      newBatsmanId: replacementPlayerId,
+      strikerId: nextStrikerId,
+      nonStrikerId: nextNonStrikerId,
+      bowlerId: inningsData.bowlerId,
+      runs: 0,
+      legalBall: false,
+      timestamp: new Date().toISOString()
+    };
+
+    return await this.provider.saveMatchEvent(matchId, event);
+  }
+
   async declareBatsmen(matchId, { strikerId, nonStrikerId, inningsIndex = 0 }) {
     const match = await this._verifyScorerOwnership(matchId);
 

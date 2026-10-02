@@ -317,7 +317,7 @@ export class FirebaseStorageProvider extends StorageProvider {
   }
 
   // --- Atomic Firebase Umpire Lock (Heartbeat & TTL based) ---
-  async acquireUmpireLock(sessionId, username, force = false) {
+  async acquireUmpireLock(sessionId, username) {
     const cleanUser = (username || 'umpire').trim().toLowerCase();
     const sessionRef = doc(this.db, 'systemSessions', cleanUser);
     const now = Date.now();
@@ -330,9 +330,9 @@ export class FirebaseStorageProvider extends StorageProvider {
           const data = sessionDoc.data();
           const isStale = (now - (data.lastHeartbeat || 0)) > 30000;
 
-          // Active lock exists with a different session ID, not stale, and not forced
-          if (data.status === 'ACTIVE' && data.sessionId !== sessionId && !isStale && !force) {
-            return { acquired: false, existingSession: data, canForceTakeover: true };
+          // Active lock exists with a different session ID and is not stale
+          if (data.status === 'ACTIVE' && data.sessionId !== sessionId && !isStale) {
+            return { acquired: false, existingSession: data, canForceTakeover: false };
           }
         }
 

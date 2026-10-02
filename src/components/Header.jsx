@@ -22,7 +22,7 @@ export default function Header({ activeTab, onTabChange, currentUser, onLogout }
             onClick={() => onTabChange('matches')}
           >
             <Trophy size={16} />
-            <span>Matches</span>
+            <span className="nav-label">Matches</span>
           </button>
 
           <button
@@ -30,7 +30,7 @@ export default function Header({ activeTab, onTabChange, currentUser, onLogout }
             onClick={() => onTabChange('teams')}
           >
             <Users size={16} />
-            <span>Teams</span>
+            <span className="nav-label">Teams</span>
           </button>
 
           <button
@@ -38,7 +38,7 @@ export default function Header({ activeTab, onTabChange, currentUser, onLogout }
             onClick={() => onTabChange('players')}
           >
             <User size={16} />
-            <span>Players</span>
+            <span className="nav-label">Players</span>
           </button>
 
           <button
@@ -46,16 +46,18 @@ export default function Header({ activeTab, onTabChange, currentUser, onLogout }
             onClick={() => onTabChange('settings')}
           >
             <SettingsIcon size={16} />
-            <span>Settings</span>
+            <span className="nav-label">Settings</span>
           </button>
+        </nav>
 
+        <div className="header-actions">
           <StorageStatus />
 
           {/* User Session Info & Logout */}
           {currentUser && (
             <div className="header-user-section">
               <span className={`user-role-badge ${isUmpire ? 'role-umpire' : 'role-user'}`} title={`Logged in as ${currentUser.username}`}>
-                {isUmpire ? <ShieldCheck size={14} /> : <User size={14} />}
+                {isUmpire ? <ShieldCheck size={13} /> : <User size={13} />}
                 <span>{currentUser.role}</span>
               </span>
 
@@ -64,14 +66,13 @@ export default function Header({ activeTab, onTabChange, currentUser, onLogout }
                 onClick={onLogout}
                 title="Logout"
               >
-                <LogOut size={15} />
+                <LogOut size={14} />
                 <span className="logout-text">Logout</span>
               </button>
             </div>
           )}
-        </nav>
+        </div>
       </div>
     </header>
   );
 }
-

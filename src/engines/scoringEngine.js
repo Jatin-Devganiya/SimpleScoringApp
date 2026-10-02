@@ -11,7 +11,8 @@ export const EVENT_TYPES = {
   RUN: 'RUN',
   WIDE: 'WIDE',
   NO_BALL: 'NO_BALL',
-  WICKET: 'WICKET'
+  WICKET: 'WICKET',
+  DECLARE: 'DECLARE'
 };
 
 /**
@@ -211,6 +212,24 @@ export function reconstructInnings({
         if (dismissedId === strikerId) {
           strikerId = ev.newBatsmanId;
         } else if (dismissedId === nonStrikerId) {
+          nonStrikerId = ev.newBatsmanId;
+        }
+      }
+    } else if (ev.type === EVENT_TYPES.DECLARE) {
+      const declaredId = ev.declaredPlayerId || ev.dismissedPlayerId;
+      wickets += 1;
+
+      const outBatsmanStats = batsmanStats[declaredId];
+      if (outBatsmanStats) {
+        outBatsmanStats.isOut = true;
+        outBatsmanStats.dismissalText = 'Declared / Retired';
+      }
+
+      // Replace declared batsman with new batsman
+      if (ev.newBatsmanId) {
+        if (declaredId === strikerId) {
+          strikerId = ev.newBatsmanId;
+        } else if (declaredId === nonStrikerId) {
           nonStrikerId = ev.newBatsmanId;
         }
       }

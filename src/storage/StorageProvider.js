@@ -189,7 +189,7 @@ export class StorageProvider {
    * @param {boolean} force
    * @returns {Promise<{ acquired: boolean, existingSession?: Object }>}
    */
-  async acquireUmpireLock(sessionId, username, force = false) {
+  async acquireUmpireLock(sessionId, username) {
     throw new Error('Method acquireUmpireLock() must be implemented');
   }
 

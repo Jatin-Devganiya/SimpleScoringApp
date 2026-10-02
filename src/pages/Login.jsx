@@ -10,13 +10,11 @@ export default function Login({ onLoginSuccess }) {
   const [password, setPassword] = useState('');
   const [role, setRole] = useState(ROLES.UMPIRE);
   const [error, setError] = useState('');
-  const [canTakeover, setCanTakeover] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
     setError('');
-    setCanTakeover(false);
     setLoading(true);
 
     try {
@@ -29,22 +27,6 @@ export default function Login({ onLoginSuccess }) {
       onLoginSuccess(session);
     } catch (err) {
       setError(err.message || 'Authentication failed.');
-      if (err.canForceTakeover) {
-        setCanTakeover(true);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleForceTakeover = async () => {
-    setError('');
-    setLoading(true);
-    try {
-      const session = await authService.login(username, password, { force: true });
-      onLoginSuccess(session);
-    } catch (err) {
-      setError(err.message || 'Takeover failed.');
     } finally {
       setLoading(false);
     }
@@ -139,19 +121,8 @@ export default function Login({ onLoginSuccess }) {
         {error && (
           <div className="alert-box alert-error" style={{ marginBottom: '20px' }}>
             <AlertCircle size={20} style={{ flexShrink: 0 }} />
-            <div style={{ width: '100%' }}>
-              <div>{error}</div>
-              {canTakeover && (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{ marginTop: '10px', width: '100%', fontSize: '0.85rem', padding: '8px 12px' }}
-                  onClick={handleForceTakeover}
-                  disabled={loading}
-                >
-                  <ArrowRight size={14} /> Take Over Session & Sign In
-                </button>
-              )}
+            <div style={{ width: '100%', fontSize: '0.9rem', lineHeight: '1.4' }}>
+              {error}
             </div>
           </div>
         )}

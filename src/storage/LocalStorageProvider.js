@@ -314,7 +314,7 @@ export class LocalStorageProvider extends StorageProvider {
   }
 
   // --- Single Umpire Session Lock (Heartbeat & TTL based) ---
-  async acquireUmpireLock(sessionId, username, force = false) {
+  async acquireUmpireLock(sessionId, username) {
     const store = this._readStore();
     const cleanUser = (username || 'umpire').trim().toLowerCase();
     if (!store.activeUmpireSessions) store.activeUmpireSessions = {};
@@ -325,8 +325,8 @@ export class LocalStorageProvider extends StorageProvider {
     // Stale session check: If no heartbeat in 30 seconds, treat as expired (e.g. browser closed)
     const isStale = currentLock && (now - (currentLock.lastHeartbeat || 0) > 30000);
 
-    if (currentLock && currentLock.status === 'ACTIVE' && currentLock.sessionId !== sessionId && !isStale && !force) {
-      return { acquired: false, existingSession: currentLock, canForceTakeover: true };
+    if (currentLock && currentLock.status === 'ACTIVE' && currentLock.sessionId !== sessionId && !isStale) {
+      return { acquired: false, existingSession: currentLock, canForceTakeover: false };
     }
 
     const newLock = {

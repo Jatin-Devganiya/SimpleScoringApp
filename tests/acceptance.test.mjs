@@ -68,14 +68,15 @@ async function runTests() {
     await authService.login('umpire1', 'pass123');
   } catch (err) {
     secondUmpireFailed = true;
-    assert(err.canForceTakeover === true, 'Error indicates session can be taken over');
-    assert(err.message.includes('active session'), 'Second Umpire login rejected with active session error');
+    assert(err.isUmpireLocked === true, 'Error indicates umpire account is locked');
+    assert(err.message.includes('currently logged in on another device'), 'Second Umpire login rejected with clear concurrency message');
   }
-  assert(secondUmpireFailed, 'Simultaneous login for same Umpire is rejected');
+  assert(secondUmpireFailed, 'Simultaneous login for same Umpire is strictly rejected');
 
-  // Test 3: Force Takeover succeeds (e.g. if browser closed without explicit logout)
-  const takenOverSession = await authService.login('umpire1', 'pass123', { force: true });
-  assert(takenOverSession && takenOverSession.username === 'umpire1', 'Force Takeover succeeds without lockout');
+  // Test 3: After explicit logout, login succeeds again
+  await authService.logout();
+  const reloggedSession = await authService.login('umpire1', 'pass123');
+  assert(reloggedSession && reloggedSession.username === 'umpire1', 'Umpire can log in after previous session logged out');
   await authService.logout();
 
 

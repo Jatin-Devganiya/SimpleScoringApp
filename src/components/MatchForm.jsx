@@ -64,11 +64,17 @@ export default function MatchForm({ teams = [], onStartMatch, onCancel }) {
       return;
     }
 
+    const parsedOvers = parseInt(totalOvers, 10);
+    if (isNaN(parsedOvers) || parsedOvers < 1) {
+      setError('Please enter a valid number of overs (minimum 1).');
+      return;
+    }
+
     setError('');
     onStartMatch({
       team1Id,
       team2Id,
-      totalOvers: parseInt(totalOvers, 10),
+      totalOvers: parsedOvers,
       battingFirstTeamId,
       openingStrikerId,
       openingNonStrikerId,
@@ -123,17 +129,19 @@ export default function MatchForm({ teams = [], onStartMatch, onCancel }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
         <div className="form-group">
           <label className="form-label">Total Overs</label>
-          <select
-            className="form-select"
+          <input
+            type="number"
+            min="1"
+            max="100"
+            className="form-input"
             value={totalOvers}
-            onChange={(e) => setTotalOvers(Number(e.target.value))}
-          >
-            <option value={5}>5 Overs</option>
-            <option value={10}>10 Overs</option>
-            <option value={15}>15 Overs</option>
-            <option value={20}>20 Overs (T20)</option>
-            <option value={50}>50 Overs (ODI)</option>
-          </select>
+            onChange={(e) => {
+              const val = e.target.value;
+              setTotalOvers(val === '' ? '' : Math.max(1, parseInt(val, 10) || 1));
+            }}
+            placeholder="e.g. 20"
+            required
+          />
         </div>
 
         <div className="form-group">

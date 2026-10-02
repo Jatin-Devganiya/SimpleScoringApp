@@ -8,7 +8,7 @@ import BattingScore from '../components/BattingScore';
 import BowlingScore from '../components/BowlingScore';
 import CurrentOver from '../components/CurrentOver';
 import ScoreButtons from '../components/ScoreButtons';
-import { ArrowLeft, CheckCircle, FileText, UserCheck, ShieldAlert, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, CheckCircle, FileText, UserCheck, ShieldAlert, AlertTriangle, Eye, UserX, AlertCircle } from 'lucide-react';
 
 export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
   const [matchState, setMatchState] = useState(null);
@@ -24,8 +24,8 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
   // Modal form states
   const [newBatsmanId, setNewBatsmanId] = useState('');
   const [newBowlerId, setNewBowlerId] = useState('');
-  const [declareStrikerId, setDeclareStrikerId] = useState('');
-  const [declareNonStrikerId, setDeclareNonStrikerId] = useState('');
+  const [declareTarget, setDeclareTarget] = useState('striker');
+  const [declareReplacementId, setDeclareReplacementId] = useState('');
 
   const [secondInningsStriker, setSecondInningsStriker] = useState('');
   const [secondInningsNonStriker, setSecondInningsNonStriker] = useState('');
@@ -240,26 +240,27 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
     }
   };
 
-  const handleConfirmDeclareBatsmen = async () => {
-    if (!declareStrikerId || !declareNonStrikerId) {
-      alert('Please select both striker and non-striker.');
+  const handleConfirmDeclareBatsman = async () => {
+    const declaredPlayerId = declareTarget === 'striker' ? currentInningsData?.strikerId : currentInningsData?.nonStrikerId;
+    if (!declaredPlayerId) {
+      alert('Could not identify active batsman.');
       return;
     }
-    if (declareStrikerId === declareNonStrikerId) {
-      alert('Striker and Non-Striker must be different players.');
+    if (!declareReplacementId) {
+      alert('Please select an incoming replacement batsman.');
       return;
     }
 
     try {
-      await scoringService.declareBatsmen(matchId, {
-        strikerId: declareStrikerId,
-        nonStrikerId: declareNonStrikerId,
+      await scoringService.declareBatsman(matchId, {
+        declaredPlayerId,
+        replacementPlayerId: declareReplacementId,
         inningsIndex: currentInningsIndex
       });
       setShowDeclareModal(false);
       await loadMatchState();
     } catch (err) {
-      alert(`Declare batsmen error: ${err.message}`);
+      alert(`Declare batsman error: ${err.message}`);
     }
   };
 
@@ -300,33 +301,31 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
   return (
     <div>
       {/* Top action bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-        <button className="btn btn-secondary" onClick={onBack} style={{ padding: '8px 12px', fontSize: '0.85rem' }}>
-          <ArrowLeft size={16} /> Back to Matches
+      <div className="live-header-bar">
+        <button className="btn btn-secondary live-back-btn" onClick={onBack}>
+          <ArrowLeft size={16} /> <span>Back to Matches</span>
         </button>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div className="live-header-actions">
           {canScore && !isFirstInningsFinished && !isMatchCompleted && (
             <button
-              className="btn btn-secondary"
+              className="btn btn-secondary live-action-btn"
               onClick={() => {
-                setDeclareStrikerId(currentInningsData?.strikerId || '');
-                setDeclareNonStrikerId(currentInningsData?.nonStrikerId || '');
+                setDeclareTarget('striker');
+                setDeclareReplacementId(availableBatsmen[0]?.id || '');
                 setShowDeclareModal(true);
               }}
-              style={{ padding: '8px 14px', fontSize: '0.85rem' }}
-              title="Explicitly set Striker and Non-Striker"
+              title="Declare an active batsman and replace with a new batsman"
             >
-              <UserCheck size={16} /> Declare Batsmen
+              <UserX size={15} /> <span>Declare Batsman</span>
             </button>
           )}
 
           <button
-            className="btn btn-secondary"
+            className="btn btn-secondary live-action-btn"
             onClick={() => onViewScorecard(matchId)}
-            style={{ padding: '8px 14px', fontSize: '0.85rem' }}
           >
-            <FileText size={16} /> View Scorecard
+            <FileText size={15} /> <span>View Scorecard</span>
           </button>
         </div>
       </div>
@@ -574,55 +573,108 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
         </div>
       )}
 
-      {/* Declare Batsmen Modal */}
+      {/* Declare Batsman Modal */}
       {showDeclareModal && canScore && (
         <div className="modal-overlay">
           <div className="modal-card">
-            <h3 className="modal-title">Declare Batsmen</h3>
+            <h3 className="modal-title">Declare Batsman (Retired)</h3>
             <p className="modal-desc">
-              Explicitly set who is on strike and at the non-striker end:
+              Choose which currently batting player to declare out, and select their replacement from remaining team members:
             </p>
 
-            <div className="form-group">
-              <label className="form-label">Striker (★)</label>
-              <select
-                className="form-select"
-                value={declareStrikerId}
-                onChange={(e) => setDeclareStrikerId(e.target.value)}
-                required
-              >
-                <option value="">-- Choose Striker --</option>
-                {nonOutBattingSquad.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label className="form-label">1. Choose Active Batsman to Declare</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div
+                  onClick={() => setDeclareTarget('striker')}
+                  style={{
+                    padding: '12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `2px solid ${declareTarget === 'striker' ? 'var(--accent-red)' : 'var(--border-color)'}`,
+                    background: declareTarget === 'striker' ? 'rgba(239, 68, 68, 0.12)' : 'var(--bg-surface-elevated)',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-yellow)' }}>
+                      ★ STRIKER
+                    </span>
+                    {declareTarget === 'striker' && (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--accent-red)', fontWeight: 700 }}>
+                        DECLARE
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#fff' }}>
+                    {strikerStats?.name || 'Striker'}
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                    {strikerStats?.runs || 0} ({strikerStats?.balls || 0} balls)
+                  </div>
+                </div>
+
+                <div
+                  onClick={() => setDeclareTarget('nonStriker')}
+                  style={{
+                    padding: '12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: `2px solid ${declareTarget === 'nonStriker' ? 'var(--accent-red)' : 'var(--border-color)'}`,
+                    background: declareTarget === 'nonStriker' ? 'rgba(239, 68, 68, 0.12)' : 'var(--bg-surface-elevated)',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                      NON-STRIKER
+                    </span>
+                    {declareTarget === 'nonStriker' && (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--accent-red)', fontWeight: 700 }}>
+                        DECLARE
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#fff' }}>
+                    {nonStrikerStats?.name || 'Non-Striker'}
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                    {nonStrikerStats?.runs || 0} ({nonStrikerStats?.balls || 0} balls)
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="form-group">
-              <label className="form-label">Non-Striker</label>
-              <select
-                className="form-select"
-                value={declareNonStrikerId}
-                onChange={(e) => setDeclareNonStrikerId(e.target.value)}
-                required
-              >
-                <option value="">-- Choose Non-Striker --</option>
-                {nonOutBattingSquad.map((p) => (
-                  <option key={p.id} value={p.id} disabled={p.id === declareStrikerId}>
-                    {p.name} {p.id === declareStrikerId ? '(Selected as Striker)' : ''}
-                  </option>
-                ))}
-              </select>
+              <label className="form-label">2. Select Replacement Batsman</label>
+              {availableBatsmen.length === 0 ? (
+                <div className="alert-box alert-error" style={{ marginBottom: 0 }}>
+                  <AlertCircle size={16} />
+                  <span>No remaining players left in the batting team squad to replace this batsman.</span>
+                </div>
+              ) : (
+                <select
+                  className="form-select"
+                  value={declareReplacementId}
+                  onChange={(e) => setDeclareReplacementId(e.target.value)}
+                  required
+                >
+                  <option value="">-- Choose Incoming Batsman --</option>
+                  {availableBatsmen.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              )}
             </div>
 
             <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
               <button
                 className="btn btn-primary"
-                style={{ flex: 1 }}
-                onClick={handleConfirmDeclareBatsmen}
-                disabled={!declareStrikerId || !declareNonStrikerId || declareStrikerId === declareNonStrikerId}
+                style={{ flex: 1, background: 'var(--accent-red)', borderColor: 'var(--accent-red)' }}
+                onClick={handleConfirmDeclareBatsman}
+                disabled={!declareReplacementId || availableBatsmen.length === 0}
               >
-                Confirm Batsmen
+                Confirm Batsman Declaration
               </button>
               <button
                 className="btn btn-secondary"
