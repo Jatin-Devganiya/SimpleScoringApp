@@ -41,13 +41,15 @@ export default function Header({ activeTab, onTabChange, currentUser, onLogout }
             <span className="nav-label">Players</span>
           </button>
 
-          <button
-            className={`nav-link ${activeTab === 'settings' ? 'active' : ''}`}
-            onClick={() => onTabChange('settings')}
-          >
-            <SettingsIcon size={16} />
-            <span className="nav-label">Settings</span>
-          </button>
+          {isUmpire && (
+            <button
+              className={`nav-link ${activeTab === 'settings' ? 'active' : ''}`}
+              onClick={() => onTabChange('settings')}
+            >
+              <SettingsIcon size={16} />
+              <span className="nav-label">Settings</span>
+            </button>
+          )}
         </nav>
 
         <div className="header-actions">

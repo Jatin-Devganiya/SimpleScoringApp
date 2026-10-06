@@ -34,6 +34,15 @@ export default function App() {
     }
   }, []);
 
+  const isUmpire = currentUser?.role === 'UMPIRE';
+
+  // Automatically redirect regular users away from settings tab
+  useEffect(() => {
+    if (activeTab === 'settings' && !isUmpire) {
+      setActiveTab('matches');
+    }
+  }, [activeTab, isUmpire]);
+
   const handleLoginSuccess = (session) => {
     setCurrentUser(session);
     setActiveTab('matches');
@@ -156,7 +165,7 @@ export default function App() {
 
         {activeTab === 'players' && <Players />}
 
-        {activeTab === 'settings' && <Settings />}
+        {activeTab === 'settings' && isUmpire && <Settings />}
 
         {activeTab === 'live' && activeMatchId && (
           <LiveMatch

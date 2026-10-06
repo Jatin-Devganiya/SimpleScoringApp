@@ -1,14 +1,20 @@
 import React, { useState } from 'react';
 import { appConfig } from '../config/appConfig';
 import { backupService } from '../services/BackupService';
+import { teamService } from '../services/TeamService';
+import { playerService } from '../services/PlayerService';
+import { authService } from '../services/AuthService';
 import StorageStatus from '../components/StorageStatus';
-import { Download, Upload, Trash2, Check, AlertTriangle, ShieldCheck, Database } from 'lucide-react';
+import { Download, Upload, Trash2, Check, AlertTriangle, ShieldCheck, Database, Sparkles, ShieldAlert } from 'lucide-react';
 
 export default function Settings() {
   const [feedback, setFeedback] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isSeeding, setIsSeeding] = useState(false);
   const [showClearModal, setShowClearModal] = useState(false);
+
+  const isUmpire = authService.isUmpire();
 
   const handleExport = async () => {
     try {
@@ -48,6 +54,45 @@ export default function Settings() {
     reader.readAsText(file);
   };
 
+  const handleSeedDemoData = async () => {
+    try {
+      setIsSeeding(true);
+      setFeedback(null);
+      const indNames = ['Rohit Sharma', 'Virat Kohli', 'Shubman Gill', 'Hardik Pandya', 'Jasprit Bumrah'];
+      const ausNames = ['Travis Head', 'David Warner', 'Steve Smith', 'Glenn Maxwell', 'Pat Cummins'];
+
+      const getOrCreatePlayerId = async (name) => {
+        const existing = (await playerService.getPlayers()).find(
+          p => p.name.trim().toLowerCase() === name.trim().toLowerCase()
+        );
+        if (existing) return existing.id;
+        const created = await playerService.createPlayer(name);
+        return created.id;
+      };
+
+      const indPlayerIds = [];
+      for (const name of indNames) {
+        indPlayerIds.push(await getOrCreatePlayerId(name));
+      }
+
+      const ausPlayerIds = [];
+      for (const name of ausNames) {
+        ausPlayerIds.push(await getOrCreatePlayerId(name));
+      }
+
+      await teamService.createTeam('India', indPlayerIds);
+      await teamService.createTeam('Australia', ausPlayerIds);
+      setFeedback({
+        type: 'success',
+        message: 'Sample teams (India vs Australia) and 10 players created successfully!'
+      });
+    } catch (err) {
+      setFeedback({ type: 'error', message: `Could not seed sample data: ${err.message}` });
+    } finally {
+      setIsSeeding(false);
+    }
+  };
+
   const handleClearData = async () => {
     try {
       setFeedback(null);
@@ -62,6 +107,15 @@ export default function Settings() {
       setFeedback({ type: 'error', message: err.message || 'Failed to clear data.' });
     }
   };
+
+  if (!isUmpire) {
+    return (
+      <div className="alert-box alert-error" style={{ margin: '30px 0' }}>
+        <ShieldAlert size={20} />
+        <span>Settings and data management are restricted to Umpires only.</span>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -129,6 +183,25 @@ export default function Settings() {
             />
           </label>
         </div>
+      </div>
+
+      {/* Quick Setup: Seed Sample Teams & Players */}
+      <div className="card">
+        <h3 style={{ fontSize: '1.15rem', fontWeight: 700, marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Sparkles size={18} color="var(--accent-gold)" /> Quick Match Setup
+        </h3>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '16px' }}>
+          Instantly generate sample teams (<strong>India</strong> and <strong>Australia</strong>) with 10 real players to quickly test scoring, overs, and match workflows.
+        </p>
+
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={handleSeedDemoData}
+          disabled={isSeeding}
+        >
+          <Sparkles size={16} /> {isSeeding ? 'Generating Sample Squads...' : 'Seed Sample Teams & Players (India vs Australia)'}
+        </button>
       </div>
 
       {/* Clear Application Data */}
