@@ -474,6 +474,85 @@ async function runTests() {
   });
   assert(finalRemaining.length === 0, 'No remaining players left once all have batted or declared');
 
+  // Test: Swap strike manually
+  const strikerBeforeSwap = mState.innings1.strikerId;
+  const nonStrikerBeforeSwap = mState.innings1.nonStrikerId;
+  await scoringService.swapStrike(match.id, { inningsIndex: 0 });
+  mState = await scoringService.getCompleteMatchState(match.id);
+  assert(mState.innings1.strikerId === nonStrikerBeforeSwap, 'Manual swapStrike sets striker to previous non-striker');
+  assert(mState.innings1.nonStrikerId === strikerBeforeSwap, 'Manual swapStrike sets non-striker to previous striker');
+
+  // Test: Manually set striker and non-striker via setBatsmen
+  await scoringService.setBatsmen(match.id, {
+    strikerId: strikerBeforeSwap,
+    nonStrikerId: nonStrikerBeforeSwap,
+    inningsIndex: 0
+  });
+  mState = await scoringService.getCompleteMatchState(match.id);
+  assert(mState.innings1.strikerId === strikerBeforeSwap, 'setBatsmen sets specified striker');
+  assert(mState.innings1.nonStrikerId === nonStrikerBeforeSwap, 'setBatsmen sets specified non-striker');
+
+  // Test: Simplified dismissal with dismissalType = 'Wicket' (bowler dismissed striker)
+  // Create a fresh match with full squads to test simplified Wicket and Run Out
+  const bat1 = await playerService.createPlayer('Batsman One');
+  const bat2 = await playerService.createPlayer('Batsman Two');
+  const bat3 = await playerService.createPlayer('Batsman Three');
+  const bat4 = await playerService.createPlayer('Batsman Four');
+  const bowl1 = await playerService.createPlayer('Bowler Alpha Simple');
+  const bowl2 = await playerService.createPlayer('Bowler Beta Simple');
+
+  const testTeamA = await teamService.createTeam('Team Simple Bat', [bat1.id, bat2.id, bat3.id, bat4.id]);
+  const testTeamB = await teamService.createTeam('Team Simple Bowl', [bowl1.id, bowl2.id]);
+
+  const testMatch = await matchService.createMatch({
+    team1Id: testTeamA.id,
+    team2Id: testTeamB.id,
+    battingFirstTeamId: testTeamA.id,
+    totalOvers: 5,
+    openingStrikerId: bat1.id,
+    openingNonStrikerId: bat2.id,
+    openingBowlerId: bowl1.id
+  });
+
+  // Delivery 1: Normal 'Wicket'
+  await scoringService.recordWicket(testMatch.id, {
+    runs: 0,
+    strikerId: bat1.id,
+    nonStrikerId: bat2.id,
+    bowlerId: bowl1.id,
+    dismissalType: 'Wicket',
+    dismissedPlayerId: bat1.id,
+    newBatsmanId: bat3.id,
+    inningsIndex: 0
+  });
+
+  let tState = await scoringService.getCompleteMatchState(testMatch.id);
+  assert(tState.innings1.wickets === 1, 'Standard "Wicket" increments wicket count to 1');
+  assert(tState.innings1.bowlerStats[bowl1.id].wickets === 1, 'Bowler credited with 1 wicket for "Wicket" dismissal');
+  assert(tState.innings1.batsmanStats[bat1.id].isOut === true, 'Striker bat1 marked as out');
+  assert(tState.innings1.batsmanStats[bat1.id].dismissalText.includes('Bowler Alpha Simple'), 'Dismissal text shows bowler name');
+  assert(tState.innings1.strikerId === bat3.id, 'Incoming replacement bat3 is on strike');
+
+  // Delivery 2: Run Out with 2 runs completed, non-striker (bat2) is dismissed
+  await scoringService.recordWicket(testMatch.id, {
+    runs: 2,
+    strikerId: bat3.id,
+    nonStrikerId: bat2.id,
+    bowlerId: bowl1.id,
+    dismissalType: 'Run Out',
+    dismissedPlayerId: bat2.id,
+    newBatsmanId: bat4.id,
+    inningsIndex: 0
+  });
+
+  tState = await scoringService.getCompleteMatchState(testMatch.id);
+  assert(tState.innings1.score === 2, 'Run Out with 2 runs adds 2 runs to the innings score');
+  assert(tState.innings1.wickets === 2, 'Run Out increments wicket count to 2');
+  assert(tState.innings1.bowlerStats[bowl1.id].wickets === 1, 'Bowler is NOT credited with wicket on Run Out');
+  assert(tState.innings1.batsmanStats[bat2.id].isOut === true, 'Non-striker bat2 is marked as out from run out');
+  assert(tState.innings1.batsmanStats[bat2.id].dismissalText.toLowerCase().includes('run out'), 'Dismissal text contains run out');
+  assert(tState.innings1.nonStrikerId === bat4.id, 'Incoming batsman replaces dismissed non-striker');
+
   console.log('\n==================================================');
   console.log(`TEST SUMMARY: ${passed} Passed, ${failed} Failed`);
   console.log('==================================================');

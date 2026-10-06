@@ -180,7 +180,7 @@ export class ScoringService {
     return await this.provider.saveMatchEvent(matchId, event);
   }
 
-  async declareBatsmen(matchId, { strikerId, nonStrikerId, inningsIndex = 0 }) {
+  async setBatsmen(matchId, { strikerId, nonStrikerId, inningsIndex = 0 }) {
     const match = await this._verifyScorerOwnership(matchId);
 
     if (!strikerId || !nonStrikerId) {
@@ -198,10 +198,44 @@ export class ScoringService {
       nonStrikerId
     };
 
-    return await this.provider.updateMatch({
+    await this.provider.updateMatch({
       ...match,
       innings: updatedInningsList
     });
+
+    const events = await this.provider.getMatchEvents(matchId);
+    const event = {
+      id: generateId('event'),
+      matchId,
+      inningsIndex,
+      sequence: events.length + 1,
+      type: EVENT_TYPES.BATSMAN_CHANGE,
+      strikerId,
+      nonStrikerId,
+      runs: 0,
+      legalBall: false,
+      timestamp: new Date().toISOString()
+    };
+
+    return await this.provider.saveMatchEvent(matchId, event);
+  }
+
+  async swapStrike(matchId, { inningsIndex = 0 }) {
+    await this._verifyScorerOwnership(matchId);
+    const state = await this.getCompleteMatchState(matchId);
+    const inningsData = inningsIndex === 0 ? state?.innings1 : state?.innings2;
+    if (!inningsData?.strikerId || !inningsData?.nonStrikerId) {
+      throw new Error('Active batsmen not found.');
+    }
+    return await this.setBatsmen(matchId, {
+      strikerId: inningsData.nonStrikerId,
+      nonStrikerId: inningsData.strikerId,
+      inningsIndex
+    });
+  }
+
+  async declareBatsmen(matchId, options) {
+    return await this.setBatsmen(matchId, options);
   }
 
   async setNextBowler(matchId, { bowlerId, inningsIndex = 0 }) {

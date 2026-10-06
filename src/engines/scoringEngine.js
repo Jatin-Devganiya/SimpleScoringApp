@@ -13,7 +13,8 @@ export const EVENT_TYPES = {
   NO_BALL: 'NO_BALL',
   WICKET: 'WICKET',
   DECLARE: 'DECLARE',
-  BOWLER_CHANGE: 'BOWLER_CHANGE'
+  BOWLER_CHANGE: 'BOWLER_CHANGE',
+  BATSMAN_CHANGE: 'BATSMAN_CHANGE'
 };
 
 /**
@@ -215,7 +216,7 @@ export function reconstructInnings({
         }
         if (isRunOut) {
           outBatsmanStats.dismissalText = 'run out';
-        } else if (ev.dismissalType) {
+        } else if (ev.dismissalType && ev.dismissalType !== 'Wicket') {
           outBatsmanStats.dismissalText = `${ev.dismissalType.toLowerCase()} b ${bowlStats?.name || 'Bowler'}`;
         } else {
           outBatsmanStats.dismissalText = `b ${bowlStats?.name || 'Bowler'}`;
@@ -273,6 +274,9 @@ export function reconstructInnings({
         currentBowlerId = ev.bowlerId;
         pendingNewBowler = false;
       }
+    } else if (ev.type === EVENT_TYPES.BATSMAN_CHANGE) {
+      if (ev.strikerId) strikerId = ev.strikerId;
+      if (ev.nonStrikerId) nonStrikerId = ev.nonStrikerId;
     }
 
     // End of over check

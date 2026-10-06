@@ -8,7 +8,7 @@ import BattingScore from '../components/BattingScore';
 import BowlingScore from '../components/BowlingScore';
 import CurrentOver from '../components/CurrentOver';
 import ScoreButtons from '../components/ScoreButtons';
-import { ArrowLeft, CheckCircle, FileText, UserCheck, ShieldAlert, AlertTriangle, Eye, UserX, AlertCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle, FileText, UserCheck, ShieldAlert, AlertTriangle, Eye, UserX, AlertCircle, Users } from 'lucide-react';
 
 export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
   const [matchState, setMatchState] = useState(null);
@@ -19,15 +19,18 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
   const [showWicketModal, setShowWicketModal] = useState(false);
   const [showBowlerModal, setShowBowlerModal] = useState(false);
   const [showDeclareModal, setShowDeclareModal] = useState(false);
+  const [showChangeBatsmenModal, setShowChangeBatsmenModal] = useState(false);
   const [showSecondInningsModal, setShowSecondInningsModal] = useState(false);
 
   // Modal form states
   const [promptedOver, setPromptedOver] = useState(null);
   const [newBatsmanId, setNewBatsmanId] = useState('');
   const [newBowlerId, setNewBowlerId] = useState('');
+  const [manualStrikerId, setManualStrikerId] = useState('');
+  const [manualNonStrikerId, setManualNonStrikerId] = useState('');
   const [declareTarget, setDeclareTarget] = useState('striker');
   const [declareReplacementId, setDeclareReplacementId] = useState('');
-  const [dismissalType, setDismissalType] = useState('Bowled');
+  const [dismissalType, setDismissalType] = useState('Wicket');
   const [dismissedTarget, setDismissedTarget] = useState('striker');
   const [wicketRuns, setWicketRuns] = useState(0);
 
@@ -176,7 +179,48 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
     setShowDeclareModal(true);
   };
 
-  // Eligible batsmen for declaration (all non-out batting team players)
+  const handleQuickSwapStrike = async () => {
+    if (!canScore) return;
+    try {
+      await scoringService.swapStrike(matchId, {
+        inningsIndex: currentInningsIndex
+      });
+      await loadMatchState();
+    } catch (err) {
+      alert(`Swap strike error: ${err.message}`);
+    }
+  };
+
+  const handleOpenChangeBatsmenModal = () => {
+    setManualStrikerId(currentInningsData?.strikerId || '');
+    setManualNonStrikerId(currentInningsData?.nonStrikerId || '');
+    setShowChangeBatsmenModal(true);
+  };
+
+  const handleConfirmChangeBatsmen = async () => {
+    if (!manualStrikerId || !manualNonStrikerId) {
+      alert('Please select both striker and non-striker.');
+      return;
+    }
+    if (manualStrikerId === manualNonStrikerId) {
+      alert('Striker and Non-Striker must be different players.');
+      return;
+    }
+
+    try {
+      setShowChangeBatsmenModal(false);
+      await scoringService.setBatsmen(matchId, {
+        strikerId: manualStrikerId,
+        nonStrikerId: manualNonStrikerId,
+        inningsIndex: currentInningsIndex
+      });
+      await loadMatchState();
+    } catch (err) {
+      alert(`Change batsmen error: ${err.message}`);
+    }
+  };
+
+  // Eligible batsmen for manual change / declaration (all non-out batting team players)
   const nonOutBattingSquad = (activeBattingTeam?.players || []).filter(p => {
     const stat = currentInningsData?.batsmanStats?.[p.id];
     return !stat?.isOut;
@@ -258,7 +302,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
       setShowWicketModal(false);
       setNewBatsmanId('');
       setWicketRuns(0);
-      setDismissalType('Bowled');
+      setDismissalType('Wicket');
       setDismissedTarget('striker');
       await loadMatchState();
     } catch (err) {
@@ -360,13 +404,29 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
 
         <div className="live-header-actions">
           {canScore && !isFirstInningsFinished && !isMatchCompleted && (
-            <button
-              className="btn btn-secondary live-action-btn"
-              onClick={handleOpenDeclareModal}
-              title="Declare an active batsman and replace with a new batsman"
-            >
-              <UserX size={15} /> <span>Declare Batsman</span>
-            </button>
+            <>
+              <button
+                className="btn btn-secondary live-action-btn"
+                onClick={handleQuickSwapStrike}
+                title="Swap who is on strike"
+              >
+                ⇄ <span>Swap Strike</span>
+              </button>
+              <button
+                className="btn btn-secondary live-action-btn"
+                onClick={handleOpenChangeBatsmenModal}
+                title="Manually change striker and non-striker batsman"
+              >
+                <Users size={15} /> <span>Change Batsmen</span>
+              </button>
+              <button
+                className="btn btn-secondary live-action-btn"
+                onClick={handleOpenDeclareModal}
+                title="Declare an active batsman and replace with a new batsman"
+              >
+                <UserX size={15} /> <span>Declare Batsman</span>
+              </button>
+            </>
           )}
 
           <button
@@ -467,6 +527,8 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
             <BattingScore
               strikerStats={strikerStats}
               nonStrikerStats={nonStrikerStats}
+              onSwapStrikeClick={canScore ? handleQuickSwapStrike : null}
+              onChangeBatsmenClick={canScore ? handleOpenChangeBatsmenModal : null}
             />
             <BowlingScore
               bowlerStats={bowlerStats}
@@ -501,7 +563,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
               onWide={handleWide}
               onNoBall={handleNoBall}
               onWicketClick={() => {
-                setDismissalType('Bowled');
+                setDismissalType('Wicket');
                 setDismissedTarget('striker');
                 setWicketRuns(0);
                 if (availableBatsmen.length > 0) {
@@ -532,33 +594,44 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
               <ShieldAlert size={20} /> Wicket Fallen!
             </h3>
 
-            {/* Dismissal Type Selector */}
+            {/* Dismissal Type Selector: Just Wicket or Run Out */}
             <div className="form-group" style={{ marginBottom: '14px' }}>
-              <label className="form-label">How was the wicket taken?</label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-                {['Bowled', 'Caught', 'LBW', 'Run Out', 'Stumped', 'Hit Wicket'].map((type) => {
-                  const isSelected = dismissalType === type;
-                  return (
-                    <button
-                      key={type}
-                      type="button"
-                      onClick={() => setDismissalType(type)}
-                      style={{
-                        padding: '8px 4px',
-                        fontSize: '0.8rem',
-                        fontWeight: isSelected ? 700 : 500,
-                        borderRadius: 'var(--radius-sm)',
-                        border: `1px solid ${isSelected ? 'var(--accent-red)' : 'var(--border-color)'}`,
-                        background: isSelected ? 'rgba(239, 68, 68, 0.2)' : 'var(--bg-surface-elevated)',
-                        color: isSelected ? '#fff' : 'var(--text-secondary)',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease'
-                      }}
-                    >
-                      {type}
-                    </button>
-                  );
-                })}
+              <label className="form-label">Dismissal Type</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => setDismissalType('Wicket')}
+                  style={{
+                    padding: '10px 8px',
+                    fontSize: '0.85rem',
+                    fontWeight: dismissalType !== 'Run Out' ? 700 : 500,
+                    borderRadius: 'var(--radius-sm)',
+                    border: `1.5px solid ${dismissalType !== 'Run Out' ? 'var(--accent-red)' : 'var(--border-color)'}`,
+                    background: dismissalType !== 'Run Out' ? 'rgba(239, 68, 68, 0.2)' : 'var(--bg-surface-elevated)',
+                    color: dismissalType !== 'Run Out' ? '#fff' : 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  Wicket
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDismissalType('Run Out')}
+                  style={{
+                    padding: '10px 8px',
+                    fontSize: '0.85rem',
+                    fontWeight: dismissalType === 'Run Out' ? 700 : 500,
+                    borderRadius: 'var(--radius-sm)',
+                    border: `1.5px solid ${dismissalType === 'Run Out' ? 'var(--accent-red)' : 'var(--border-color)'}`,
+                    background: dismissalType === 'Run Out' ? 'rgba(239, 68, 68, 0.2)' : 'var(--bg-surface-elevated)',
+                    color: dismissalType === 'Run Out' ? '#fff' : 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  Run Out
+                </button>
               </div>
             </div>
 
@@ -838,6 +911,89 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
               <button
                 className="btn btn-secondary"
                 onClick={() => setShowDeclareModal(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Change Batsmen (Striker & Non-Striker) Modal */}
+      {showChangeBatsmenModal && canScore && (
+        <div className="modal-overlay">
+          <div className="modal-card">
+            <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Users size={20} color="var(--accent-cyan)" />
+              Change Active Batsmen
+            </h3>
+            <p className="modal-desc">
+              Manually set or swap who is on strike (★ Striker) and at the non-striker end. Select from any non-dismissed batsman in {activeBattingTeam?.name}.
+            </p>
+
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label className="form-label">
+                <span style={{ color: 'var(--accent-yellow)', fontWeight: 700 }}>★ Striker</span> (Facing delivery)
+              </label>
+              <select
+                className="form-select"
+                value={manualStrikerId}
+                onChange={(e) => setManualStrikerId(e.target.value)}
+                required
+              >
+                <option value="">-- Choose Striker --</option>
+                {nonOutBattingSquad.map((p) => (
+                  <option key={p.id} value={p.id} disabled={p.id === manualNonStrikerId}>
+                    {p.name} {p.id === currentInningsData?.strikerId ? '(Current Striker)' : p.id === currentInningsData?.nonStrikerId ? '(Current Non-Striker)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '20px' }}>
+              <label className="form-label">Non-Striker (Running end)</label>
+              <select
+                className="form-select"
+                value={manualNonStrikerId}
+                onChange={(e) => setManualNonStrikerId(e.target.value)}
+                required
+              >
+                <option value="">-- Choose Non-Striker --</option>
+                {nonOutBattingSquad.map((p) => (
+                  <option key={p.id} value={p.id} disabled={p.id === manualStrikerId}>
+                    {p.name} {p.id === currentInningsData?.nonStrikerId ? '(Current Non-Striker)' : p.id === currentInningsData?.strikerId ? '(Current Striker)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ flex: 1 }}
+                onClick={() => {
+                  const s = manualStrikerId;
+                  const ns = manualNonStrikerId;
+                  setManualStrikerId(ns);
+                  setManualNonStrikerId(s);
+                }}
+              >
+                ⇄ Swap Ends
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ flex: 1.5 }}
+                onClick={handleConfirmChangeBatsmen}
+                disabled={!manualStrikerId || !manualNonStrikerId || manualStrikerId === manualNonStrikerId}
+              >
+                Confirm Batsmen
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowChangeBatsmenModal(false)}
               >
                 Cancel
               </button>
