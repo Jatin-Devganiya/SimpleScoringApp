@@ -438,17 +438,6 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
         </div>
       </div>
 
-      {/* Read-Only Spectator Notice */}
-      {!canScore && (
-        <div className="alert-box" style={{ background: 'rgba(59, 130, 246, 0.1)', borderColor: 'rgba(59, 130, 246, 0.3)', color: '#93c5fd' }}>
-          <Eye size={18} />
-          <span>
-            <strong>Spectator Mode:</strong> {match.createdBy ? `This match was created and is scored by "${match.createdBy}".` : 'Viewing in read-only mode.'} Only the creator umpire can record score changes.
-          </span>
-        </div>
-      )}
-
-
       {/* Main Scoreboard Display */}
       <LiveScore
         battingTeamName={activeBattingTeam?.name || 'Batting Team'}
