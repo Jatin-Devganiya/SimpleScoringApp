@@ -82,6 +82,14 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
     if (inningsData?.pendingNewBowler && !inningsData?.isInningsCompleted && !matchState.isMatchCompleted) {
       if (promptedOver !== overIdentifier) {
         setPromptedOver(overIdentifier);
+        const bowlingSquad = (currentInningsIndex === 0 ? matchState.secondBattingTeam : matchState.firstBattingTeam)?.players || [];
+        const eligible = bowlingSquad.filter(p => {
+          if (bowlingSquad.length <= 1) return true;
+          return p.id !== inningsData?.currentBowlerId;
+        });
+        if (eligible.length > 0) {
+          setNewBowlerId(eligible[0].id);
+        }
         setShowBowlerModal(true);
       }
     }
@@ -140,13 +148,33 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
     return !isOut && !isCurrentStriker && !isCurrentNonStriker;
   });
 
-  // Eligible next bowlers (consecutive over restriction: current bowler cannot bowl next over if >1 bowler in squad)
+  // Eligible next bowlers (consecutive over restriction: current bowler / bowler of previous over cannot bowl consecutively if >1 bowler in squad)
   const eligibleNextBowlers = (activeBowlingTeam?.players || []).filter(p => {
-    if ((activeBowlingTeam?.players?.length || 0) > 1) {
-      return p.id !== currentInningsData?.currentBowlerId;
-    }
+    if ((activeBowlingTeam?.players?.length || 0) <= 1) return true;
+    if (p.id === currentInningsData?.currentBowlerId) return false;
+    const prevBowlerId = currentInningsData?.pendingNewBowler
+      ? currentInningsData?.currentBowlerId
+      : currentInningsData?.lastCompletedOverBowlerId;
+    if (prevBowlerId && p.id === prevBowlerId) return false;
     return true;
   });
+
+  const handleOpenBowlerModal = () => {
+    if (eligibleNextBowlers.length > 0 && (!newBowlerId || !eligibleNextBowlers.some(p => p.id === newBowlerId))) {
+      setNewBowlerId(eligibleNextBowlers[0].id);
+    }
+    setShowBowlerModal(true);
+  };
+
+  const handleOpenDeclareModal = () => {
+    setDeclareTarget('striker');
+    if (availableBatsmen.length > 0) {
+      setDeclareReplacementId(availableBatsmen[0].id);
+    } else {
+      setDeclareReplacementId('');
+    }
+    setShowDeclareModal(true);
+  };
 
   // Eligible batsmen for declaration (all non-out batting team players)
   const nonOutBattingSquad = (activeBattingTeam?.players || []).filter(p => {
@@ -274,12 +302,14 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
     }
 
     try {
+      setShowDeclareModal(false);
+      const replacementId = declareReplacementId;
+      setDeclareReplacementId('');
       await scoringService.declareBatsman(matchId, {
         declaredPlayerId,
-        replacementPlayerId: declareReplacementId,
+        replacementPlayerId: replacementId,
         inningsIndex: currentInningsIndex
       });
-      setShowDeclareModal(false);
       await loadMatchState();
     } catch (err) {
       alert(`Declare batsman error: ${err.message}`);
@@ -332,11 +362,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
           {canScore && !isFirstInningsFinished && !isMatchCompleted && (
             <button
               className="btn btn-secondary live-action-btn"
-              onClick={() => {
-                setDeclareTarget('striker');
-                setDeclareReplacementId(availableBatsmen[0]?.id || '');
-                setShowDeclareModal(true);
-              }}
+              onClick={handleOpenDeclareModal}
               title="Declare an active batsman and replace with a new batsman"
             >
               <UserX size={15} /> <span>Declare Batsman</span>
@@ -444,7 +470,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
             />
             <BowlingScore
               bowlerStats={bowlerStats}
-              onSwitchBowlerClick={canScore ? () => setShowBowlerModal(true) : null}
+              onSwitchBowlerClick={canScore ? handleOpenBowlerModal : null}
             />
           </div>
 
@@ -461,7 +487,7 @@ export default function LiveMatch({ matchId, onBack, onViewScorecard }) {
               <button
                 className="btn btn-secondary"
                 style={{ padding: '6px 12px', fontSize: '0.8rem' }}
-                onClick={() => setShowBowlerModal(true)}
+                onClick={handleOpenBowlerModal}
               >
                 Select Next Bowler
               </button>

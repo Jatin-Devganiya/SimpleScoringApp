@@ -91,6 +91,7 @@ export function reconstructInnings({
   const completedOversList = [];
   let isOverComplete = false;
   let pendingNewBowler = false;
+  let lastCompletedOverBowlerId = null;
 
   // Process all events sequentially
   for (let i = 0; i < events.length; i++) {
@@ -265,6 +266,8 @@ export function reconstructInnings({
           nonStrikerId = ev.newBatsmanId;
         }
       }
+      if (ev.strikerId) strikerId = ev.strikerId;
+      if (ev.nonStrikerId) nonStrikerId = ev.nonStrikerId;
     } else if (ev.type === EVENT_TYPES.BOWLER_CHANGE) {
       if (ev.bowlerId) {
         currentBowlerId = ev.bowlerId;
@@ -285,6 +288,7 @@ export function reconstructInnings({
 
         isOverComplete = true;
         pendingNewBowler = true;
+        lastCompletedOverBowlerId = currentBowlerId;
       } else {
         isOverComplete = false;
         pendingNewBowler = false;
@@ -334,6 +338,7 @@ export function reconstructInnings({
     strikerId,
     nonStrikerId,
     currentBowlerId,
+    lastCompletedOverBowlerId,
     currentOverBalls,
     completedOversList,
     isOverComplete: isOverComplete && !isInningsCompleted,

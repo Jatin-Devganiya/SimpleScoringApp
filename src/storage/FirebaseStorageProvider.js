@@ -239,13 +239,15 @@ export class FirebaseStorageProvider extends StorageProvider {
 
   async getMatchEvents(matchId) {
     try {
-      const q = query(
-        collection(this.db, 'matches', matchId, 'events'),
-        orderBy('sequence', 'asc')
-      );
-      const snap = await getDocs(q);
+      const snap = await getDocs(collection(this.db, 'matches', matchId, 'events'));
       const events = [];
       snap.forEach(d => events.push(d.data()));
+      events.sort((a, b) => {
+        const seqA = (a.sequence !== undefined && a.sequence !== null) ? a.sequence : Infinity;
+        const seqB = (b.sequence !== undefined && b.sequence !== null) ? b.sequence : Infinity;
+        if (seqA !== seqB) return seqA - seqB;
+        return (new Date(a.timestamp || 0).getTime()) - (new Date(b.timestamp || 0).getTime());
+      });
       return events;
     } catch (err) {
       console.error('Firebase getMatchEvents failed:', err);
@@ -256,8 +258,15 @@ export class FirebaseStorageProvider extends StorageProvider {
   async saveMatchEvent(matchId, event) {
     try {
       const now = new Date().toISOString();
+      let sequence = event.sequence;
+      if (sequence === undefined || sequence === null) {
+        const eventsSnap = await getDocs(collection(this.db, 'matches', matchId, 'events'));
+        sequence = eventsSnap.size + 1;
+      }
       const payload = {
         ...event,
+        matchId,
+        sequence,
         timestamp: event.timestamp || now
       };
       await setDoc(doc(this.db, 'matches', matchId, 'events', event.id), payload);

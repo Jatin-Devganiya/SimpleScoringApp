@@ -26,6 +26,7 @@ import { AuthService } from '../src/services/AuthService.js';
 import { PlayerService } from '../src/services/PlayerService.js';
 import { TeamService } from '../src/services/TeamService.js';
 import { ScoringService } from '../src/services/ScoringService.js';
+import { MatchService } from '../src/services/MatchService.js';
 import { reconstructInnings, EVENT_TYPES } from '../src/engines/scoringEngine.js';
 
 let passed = 0;
@@ -358,6 +359,120 @@ async function runTests() {
   assert(runOutState.bowlerStats['bowl1'].wickets === 0, 'Bowler not credited with run out wicket');
   assert(runOutState.bowlerStats['bowl1'].runs === 2, 'Bowler conceded 2 runs on delivery');
   assert(runOutState.nonStrikerId === 'b3', 'Replacement batsman correctly positioned');
+
+  // --------------------------------------------------------------------------
+  console.log('\n6. DECLARE BATSMAN & CHANGE BOWLER SERVICE FUNCTIONALITY');
+  // --------------------------------------------------------------------------
+  // Log in as umpire1
+  await authService.login('umpire1', 'pass123');
+  const matchService = new MatchService(provider);
+
+  const pA1 = await playerService.createPlayer('Batsman Alpha');
+  const pA2 = await playerService.createPlayer('Batsman Beta');
+  const pA3 = await playerService.createPlayer('Batsman Gamma');
+  const pA4 = await playerService.createPlayer('Batsman Delta');
+  const pB1 = await playerService.createPlayer('Bowler Alpha');
+  const pB2 = await playerService.createPlayer('Bowler Beta');
+  const pB3 = await playerService.createPlayer('Bowler Gamma');
+
+  const teamA = await teamService.createTeam('Team Batting', [pA1.id, pA2.id, pA3.id, pA4.id]);
+  const teamB = await teamService.createTeam('Team Bowling', [pB1.id, pB2.id, pB3.id]);
+
+  const match = await matchService.createMatch({
+    team1Id: teamA.id,
+    team2Id: teamB.id,
+    battingFirstTeamId: teamA.id,
+    totalOvers: 5,
+    openingStrikerId: pA1.id,
+    openingNonStrikerId: pA2.id,
+    openingBowlerId: pB1.id
+  });
+
+  assert(match && match.id, 'Match created for scoring test');
+
+  // Record 6 legal balls (first over bowled by Bowler Alpha)
+  for (let i = 0; i < 6; i++) {
+    await scoringService.recordRun(match.id, {
+      runs: 1,
+      strikerId: i % 2 === 0 ? pA1.id : pA2.id,
+      nonStrikerId: i % 2 === 0 ? pA2.id : pA1.id,
+      bowlerId: pB1.id,
+      inningsIndex: 0
+    });
+  }
+
+  let mState = await scoringService.getCompleteMatchState(match.id);
+  assert(mState.innings1.overs === '1.0', 'First over completed (1.0 overs)');
+  assert(mState.innings1.pendingNewBowler === true, 'pendingNewBowler is true after 1st over completes');
+
+  // Select new bowler (Bowler Beta) via setNextBowler
+  await scoringService.setNextBowler(match.id, {
+    bowlerId: pB2.id,
+    inningsIndex: 0
+  });
+
+  const eventsAfterBowler = await provider.getMatchEvents(match.id);
+  const bcEvent = eventsAfterBowler.find(e => e.type === EVENT_TYPES.BOWLER_CHANGE);
+  assert(bcEvent && bcEvent.sequence === 7, 'BOWLER_CHANGE event has correct sequence (7)');
+  assert(bcEvent.bowlerId === pB2.id, 'BOWLER_CHANGE event contains new bowler ID');
+
+  mState = await scoringService.getCompleteMatchState(match.id);
+  assert(mState.innings1.currentBowlerId === pB2.id, 'Match state currentBowlerId updated to new bowler');
+  assert(mState.innings1.pendingNewBowler === false, 'pendingNewBowler cleared after bowler change');
+
+  // Declare striker (Batsman Beta) and replace with remaining batsman (Batsman Gamma)
+  const currentStriker = mState.innings1.strikerId;
+  const currentNonStriker = mState.innings1.nonStrikerId;
+  assert(currentStriker === pA2.id, 'Current striker is Batsman Beta');
+  assert(currentNonStriker === pA1.id, 'Current non-striker is Batsman Alpha');
+
+  await scoringService.declareBatsman(match.id, {
+    declaredPlayerId: currentStriker,
+    replacementPlayerId: pA3.id,
+    inningsIndex: 0
+  });
+
+  const eventsAfterDeclare = await provider.getMatchEvents(match.id);
+  const declEvent = eventsAfterDeclare.find(e => e.type === EVENT_TYPES.DECLARE);
+  assert(declEvent && declEvent.sequence === 8, 'DECLARE event has correct sequence (8)');
+  assert(declEvent.declaredPlayerId === pA2.id, 'DECLARE event records declared player ID');
+  assert(declEvent.newBatsmanId === pA3.id, 'DECLARE event records new replacement batsman ID');
+
+  mState = await scoringService.getCompleteMatchState(match.id);
+  assert(mState.innings1.wickets === 1, 'Declaring batsman increments wickets to 1');
+  assert(mState.innings1.batsmanStats[pA2.id].isOut === true, 'Declared batsman marked as out');
+  assert(mState.innings1.batsmanStats[pA2.id].dismissalText === 'Declared / Retired', 'Declared batsman has "Declared / Retired" dismissal text');
+  assert(mState.innings1.strikerId === pA3.id, 'Replacement batsman (Gamma) is now on strike');
+  assert(mState.innings1.nonStrikerId === currentNonStriker, 'Non-striker remains unchanged');
+
+  // Check remaining batsmen: only Batsman Delta (pA4) remains
+  const activeBattingSquad = mState.firstBattingTeam.players;
+  const remainingEligible = activeBattingSquad.filter(p => {
+    const stat = mState.innings1.batsmanStats[p.id];
+    const isOut = stat?.isOut;
+    const isCurrentStriker = p.id === mState.innings1.strikerId;
+    const isCurrentNonStriker = p.id === mState.innings1.nonStrikerId;
+    return !isOut && !isCurrentStriker && !isCurrentNonStriker;
+  });
+  assert(remainingEligible.length === 1 && remainingEligible[0].id === pA4.id, 'Only remaining unplayed batsman (Delta) is eligible as next replacement');
+
+  // Also declare non-striker (Alpha) and replace with remaining batsman (Delta)
+  await scoringService.declareBatsman(match.id, {
+    declaredPlayerId: mState.innings1.nonStrikerId,
+    replacementPlayerId: pA4.id,
+    inningsIndex: 0
+  });
+
+  mState = await scoringService.getCompleteMatchState(match.id);
+  assert(mState.innings1.wickets === 2, 'Second declaration increments wickets to 2');
+  assert(mState.innings1.batsmanStats[pA1.id].isOut === true, 'Second declared batsman marked as out');
+  assert(mState.innings1.nonStrikerId === pA4.id, 'Non-striker is now Batsman Delta');
+
+  const finalRemaining = activeBattingSquad.filter(p => {
+    const stat = mState.innings1.batsmanStats[p.id];
+    return !stat?.isOut && p.id !== mState.innings1.strikerId && p.id !== mState.innings1.nonStrikerId;
+  });
+  assert(finalRemaining.length === 0, 'No remaining players left once all have batted or declared');
 
   console.log('\n==================================================');
   console.log(`TEST SUMMARY: ${passed} Passed, ${failed} Failed`);

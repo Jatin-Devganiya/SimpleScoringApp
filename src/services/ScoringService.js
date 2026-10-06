@@ -1,12 +1,13 @@
 import { storageProvider } from '../storage/storageFactory.js';
 import { generateId } from '../utils/ids.js';
 import { EVENT_TYPES, evaluateMatchState } from '../engines/scoringEngine.js';
-import { teamService } from './TeamService.js';
+import { teamService, TeamService } from './TeamService.js';
 import { authService } from './AuthService.js';
 
 export class ScoringService {
-  constructor(provider = storageProvider) {
+  constructor(provider = storageProvider, teamSvc = null) {
     this.provider = provider;
+    this.teamService = teamSvc || (provider === storageProvider ? teamService : new TeamService(provider));
   }
 
   async getEvents(matchId) {
@@ -144,7 +145,7 @@ export class ScoringService {
     }
 
     const state = await this.getCompleteMatchState(matchId);
-    const inningsData = state?.innings?.[inningsIndex];
+    const inningsData = inningsIndex === 0 ? state?.innings1 : state?.innings2;
     if (!inningsData) {
       throw new Error('Innings data could not be found.');
     }
@@ -159,15 +160,18 @@ export class ScoringService {
     const nextStrikerId = declaredPlayerId === currentStrikerId ? replacementPlayerId : currentStrikerId;
     const nextNonStrikerId = declaredPlayerId === currentNonStrikerId ? replacementPlayerId : currentNonStrikerId;
 
+    const events = await this.provider.getMatchEvents(matchId);
     const event = {
       id: generateId('event'),
-      type: EVENT_TYPES.DECLARE,
+      matchId,
       inningsIndex,
+      sequence: events.length + 1,
+      type: EVENT_TYPES.DECLARE,
       declaredPlayerId,
       newBatsmanId: replacementPlayerId,
       strikerId: nextStrikerId,
       nonStrikerId: nextNonStrikerId,
-      bowlerId: inningsData.bowlerId,
+      bowlerId: inningsData.currentBowlerId,
       runs: 0,
       legalBall: false,
       timestamp: new Date().toISOString()
@@ -186,8 +190,8 @@ export class ScoringService {
       throw new Error('Striker and Non-Striker must be different players.');
     }
 
-    const currentInnings = match.innings[inningsIndex];
-    const updatedInningsList = [...match.innings];
+    const currentInnings = match.innings?.[inningsIndex] || {};
+    const updatedInningsList = [...(match.innings || [])];
     updatedInningsList[inningsIndex] = {
       ...currentInnings,
       strikerId,
@@ -207,11 +211,12 @@ export class ScoringService {
       throw new Error('Please select a valid bowler.');
     }
 
-    const currentInnings = match.innings[inningsIndex];
-    const updatedInningsList = [...match.innings];
+    const currentInnings = match.innings?.[inningsIndex] || {};
+    const updatedInningsList = [...(match.innings || [])];
     updatedInningsList[inningsIndex] = {
       ...currentInnings,
-      bowlerId
+      currentBowlerId: bowlerId,
+      bowlerId: currentInnings.bowlerId || bowlerId
     };
 
     await this.provider.updateMatch({
@@ -219,10 +224,13 @@ export class ScoringService {
       innings: updatedInningsList
     });
 
+    const events = await this.provider.getMatchEvents(matchId);
     const event = {
       id: generateId('event'),
-      type: EVENT_TYPES.BOWLER_CHANGE,
+      matchId,
       inningsIndex,
+      sequence: events.length + 1,
+      type: EVENT_TYPES.BOWLER_CHANGE,
       bowlerId,
       runs: 0,
       legalBall: false,
@@ -243,8 +251,8 @@ export class ScoringService {
     if (!match) return null;
 
     const [team1, team2, events] = await Promise.all([
-      teamService.getTeam(match.team1Id),
-      teamService.getTeam(match.team2Id),
+      this.teamService.getTeam(match.team1Id),
+      this.teamService.getTeam(match.team2Id),
       this.provider.getMatchEvents(matchId)
     ]);
 
