@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node -e \"import('fs').then(fs => fs.cpSync('dist', 'docs', { recursive: true }))\"",
+    "build": "vite build && node scripts/postbuild.js",
     "preview": "vite preview",
     "test": "node --env-file=.env tests/acceptance.test.mjs",
     "predeploy": "npm run build",
